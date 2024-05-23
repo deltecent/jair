@@ -1,0 +1,128 @@
+This file provides some preliminary information about new features 
+or  bug fixes that have gone into TASM version 2.7.6 which are not 
+covered in the manual (as of version 2.7):
+
+EXIT CODES
+
+When TASM terminates, it will return to DOS the following exit 
+codes:
+
+Exit Code       Meaning
+-------------------------------------------
+0               Normal completion, no assembly errors
+1               Normal completion, with assembly errors
+2               Abnormal completion, insufficient memory
+3               Abnormal completion, file access error
+4               Abnormal completion, general error
+
+Exit  codes 2 and above will also be accompanied by messages  to  the 
+console concerning the error. 
+
+
+ERROR CHECKING CONTROL
+
+TASM   can  provide  additional  error checking  by  specifying  the 
+'-a<mask>' option at the time of execution.  If the '-a' is provided 
+without a digit following,  then all the available error checking is 
+done.   If a digit follows,  then it is used as a mask to determine 
+the  error  checks to be made.  The bits of the mask are defined  as 
+follows: 
+
+BIT     OPTION FLAG    DESCRIPTION
+--------------------------------------------------------------------
+0       -a1            Check for apparent illegal use of indirection
+1       -a2            Check for unused data in the arguments
+2       -a4            Check for duplicate labels
+4       -a8            Check for non-unary operators at start of 
+                         expression.
+
+Combinations of the above bits can also be used.  For example, '-a5' 
+would  enable  the checking for illegal  indirection  and  duplicate 
+labels. 
+
+Illegal indirection applies to micros that use parenthesis around an 
+argument  to indicate indirection.   Since it is always legal to put 
+an  extra pair of parenthesis around any expression (as far  as  the 
+expression parser is concerned),  the user may think that he/she  is 
+indicating  indirection  for an instruction that has no  indirection 
+and TASM would not complain.   Enabling this checking will result in 
+an error message (warning)  whenever an outer pair of parenthesis is 
+used  and the instruction set definition table does  not  explicitly 
+indicate that to be a valid for of addressing. 
+
+Unused  data  in arguments applies to cases where a single  byte  of 
+data is needed from an argument, but the argument contains more than 
+one byte of data.   If a full sixteen bit address is used in a 'Load 
+Immediate'  type  instruction that needs only a single  byte,  for 
+example,  an error message would be generated.   Here is an  example 
+(6502 code): 
+
+0001   1234                     .org $1234
+tasm: Unused data in MS byte of argument.  Line 0002 in test.asm
+0002   1234 A9 34       start   lda  #start
+
+To make the above checks occur whenever you do an assembly, add a 
+line like this to your AUTOEXEC.BAT file:
+
+        SET TASMOPTS=-a                         
+
+
+LINES PER PAGE
+
+TASM  defaults  to 63  lines per page when paging is enabled.    The 
+number  of  lines  per page can be altered  by  providing  a  number 
+immediately after the '-p'  option.   For example,  to set the lines 
+per  page  to 53,  use '-p53'.   Three lines are used for  the  page 
+header, so 50 lines of code would be shown per page. 
+
+
+6800/6801/6803 TABLE
+
+A 6800/6801 (and relatives) table has been added.  Invoke TASM with 
+a -68 to use it.  The default instruction set class is the 6800 set.  
+To use 6801 instructions, use the -x flag.  
+
+
+MOTOROLA HEX OUTPUT
+
+TASM  can  now generate Motorola hex object code.   A  new flag  was 
+added  to select this as well as other object code modes.   It is as 
+follows: 
+
+        -g0     for Intel hex (default)
+        -g1     for MOS Technology hex (same as -m)
+        -g2     for Motorola hex
+        -g3     for binary (same as -b)
+
+
+Z80 TABLE EXTENDED TO SUPPORT HD64180
+
+TASM can now generate code to support the Z80 extensions of the 
+HD64180.  Use the -x flag to enable the extensions.
+
+
+TMS7000 TABLE
+
+Invoke TASM with "-70" ÿto get the TMS7000 table. Standard TI syntax 
+is employed except that the indirect addressing should be ÿindicated 
+with brackets instead of parentheses.  Thus: 
+
+        MOVD  %x(B),R0          TI syntax
+        MOVD  %x[B],R0          TASM syntax
+
+
+AMBIGUITY OF MODULO OPERATOR (%) WITH BINARY PREFIX (BUG)
+
+TASM ÿdid ÿnot properly recognize '%' ÿas a modulo operator ÿif ÿthe 
+following character was a 0 or 1 (regardless of white space).  ÿThis 
+was made more discriminating, and now assumes % is a modulo operator 
+if it is in a position suitable for a binary operator. 
+
+
+FULL OUTPUT OF LONG OBJECT CODE LISTS IN LIST FILE
+
+TASM did not output more than 6 bytes of object to the list file for 
+any single mnemonic or directive (e.g. ÿ,TEXT "........") ÿÿalthough 
+all ÿdata was properly set to the object file. ÿObject bytes ÿbeyond 
+the sixth will appear on the following line in the list file. 
+

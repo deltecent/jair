@@ -1,0 +1,24 @@
+TASM Assembler.           Version 2.7.6, December, 1989.
+ Copyright (C) 1985-1989 by Speech Technology Inc. & Microsoft Corp.
+tasm: No files specified.
+tasm -<nn> [-options] src_file [obj_file [lst_file [exp_file [sym_file]]]]
+Option Flags defined as follows:
+  -<nn>    Table (48=8048 65=6502 51=8051 85=8085 80=z80)
+                 (68=6800 05=6805 70=TMS7000 32=TMS320)
+  -t<tab>    Table (alternate form of above)
+  -a         Assembly control (strict error checking)
+  -b         Produce object in binary format
+  -c         Object file written as a contigous block
+  -d<macro>  Define macro
+  -e         Show source lines with macros expanded
+  -f<xx>     Fill entire memory space with 'xx' (hex)
+  -g<x>      Obj format (0=Intel,1=MOSTech,2=Motorola,3=bin)
+  -h         Produce hex table of the assembled code
+  -l         Produce a label table in the listing
+  -m         Produce object in MOS Technology format
+  -o<xx>     Define number of bytes per obj record = <xx>
+  -p<lines>  Page the listing file
+  -q         Quiet, disable the listing file
+  -r<kb>     Set read buffer size (KB)
+  -s         Write a symbol table file
+  -x<xx>     Enable extended instruction set (if any)

@@ -1,0 +1,56 @@
+TASM SUMMARY
+--------------------------------------------------------------------------------------------------------------------------
+COMMAND LINE:                                               | DIRECTIVES:
+  tasm -vv [-<option>] src_file [obj_file [list_file        |   #INCLUDE <filename> Read <filename> as source
+                              [export_file [symbol_file]]]] |   #DEFINE  <label> [<macro_def>] Define a macro
+  -<vv>   Select version (-48,-51,-65,-85,-80,-68,-05,-32)  |   #IFDEF   <label>    Assemble following if <label> DEFINEd
+  -o<nn>  Specify number of obj bytes per record (hex)      |   #IFNDEF  <label>    Assemble following if <label> not DEFd
+  -c      object file written as a contiguous block         |   #IF      <expr>     Assemble following if <expr> nonzero
+  -d<mac> define a macro                                    |   #ELSE               Alternate block to assemble
+  -f<xx>  Fill entire memory space with <xx> (hex)          |   #ENDIF              End of conditional block
+  -g<m>   Obj format(0=Intel,1=MOSTech,2=Motorola,3=bin)    |
+  -h      Produce hex table of the assembled code           |   .ORG     <expr>     Set Instruction Pointer
+  -l      Produce a label table in the listing              |   .BYTE    <expr>     Define a byte
+  -m      Produce object in MOS Technology format           |   .WORD    <expr>     Define a word (lsb, msb)
+  -b      Produce object in binary (.COM) format            |   .EQU     <expr>     Assign a value to label
+  -e      Expand the source lines in listing file           |   .DB      <expr>     Same as BYTE
+  -t<tab> Select version (if non numeric)                   |   .DW      <expr>     Same as WORD
+  -p      Page the listing file                             |   .TEXT    <string>   Define bytes as ASCII characters
+  -x<m>   Enable extended instruction set (m = class mask)  |   .BLOCK   <expr>     Block space reserve
+  -q      Quite, disable listing file                       |   .TITLE   <string>   Set a title to appear on listing
+  -r<kb>  Set read buffer size (Kbytes, default 2K)         |   .CODES/NOCODES      Enable/disable opcodes in list file               
+  -s      Generate symbol table file                        |   .SET     <expr>     Set value of label      
+------------------------------------------------------------|   .EJECT              Do Top of Form on listing
+OPERATORS:                                                  |   .LIST/NOLIST        Enable/disable listing
+                                                            |   .SYM/AVSYM <file>   Generate symbol table file
+  Operator  Type          Description                       |   .PAGE/NOPAGE        Enable/disable paging of list file
+  __________________________________________                |   .LSFIRST            Set least significant byte first
+  +        Additive       addition                          |   .MSFIRST            Set most significant byte first
+  -                       subtraction                       |   .ADDINSTR <instdef> Add instruction
+  *        Multiplicative multiplication                    |   .END                End of source code
+  /                       division                          |   =        <expr>     Alternate form of EQU
+  %                       modulo                            |   *=       <expr>     Alternate form of ORG
+  <<                      logical shift left                |------------------------------------------------------
+  >>                      logical shift right               | CONSTANTS:
+  ~        Unary          bit inversion (one's complement)  |   Numeric constants: <digits><suffix> or <prefix><digits>
+  -                       unary negation                    |     <digits> = digit string taken from (0-9,a-f,A-F)
+  =        Relational     equal                             |     <suffix> = radix indicator defined as follows:
+  ==                      equal                             |
+  !=                      not equal                         |     Prefix   Suffix              Radix
+  <                       less than                         |     -------------------------------------
+  >                       greater than                      |     %        b or B               2   
+  <=                      less than or equal                |     @        o or O               8   
+  >=                      greater than or equal             |              d or D (or nothing)  10
+  &       Binary          binary 'and'                      |     $        h or H               16  
+  |                       binary 'or'                       |
+  ^                       binary 'exclusive or'             |   Character constants: '<char>' (e.g. 'a')
+Note: 16 bit values used.  Relational Ops yield 1 or 0.     |   String    constants: "<chars>" (.e.g "abc")
+--------------------------------------------------------------------------------------------------------------------------  
+NOTES:                                                        
+ 1. Statement format: <label> <operation> <operand> <comment>  
+ 2. The backslash can be used to separate multiple statements on a line (e.g. lda byte1 \ sta byte2).  
+ 3. '$' or '*' represent the current Instruction Counter.   
+ 4. Comments preceded by semicolon (';').                   
+ 5. TASM is case insensitive for mnemonics, but not labels. 
+--------------------------------------------------------------------------------------------------------------------------
+
