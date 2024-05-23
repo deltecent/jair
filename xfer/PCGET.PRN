@@ -1,0 +1,422 @@
+
+
+                ;
+                ;  PCGET - This CP/M program receives a file from a PC via a serial 
+                ;  port and writes it to a file on the CP/M system. The file transfer uses
+                ;  the XMODEM protocol. 
+                ;
+                ;  Note this program is gutted from the Ward Christenson Modem program.
+                ;
+                ;  Hacked together by Mike Douglas for the Altair 2SIO serial interface board.
+                ;  Hacked again by Patrick Linstruth for the JAIR single board computer.
+                ;	Ver	Date	Desc
+                ;	1.0    11/7/12	Initial version
+                ;	1.1    2/20/14  Allow transfer to occur over 2SIO port B
+                ;	1.2   12/21/14	Send NAK immediately after file open to speed
+                ;			up the start-up of file transfer (four second
+                ;			delay otherwise).
+                ;	1.3   11/19/23  Modified for JAIR SBC
+                
+                ;-----------------------------
+                ; JAIR Serial Ports 
+                ;-----------------------------
+ 0020 =         COM1	equ	20h		;COM1 base port address
+ 0020 =         COM1DAT	equ	COM1		;COM1 - data register
+ 0023 =         COM1LCR	equ	COM1 + 3	;COM1 - line control register
+ 0024 =         COM1MCR	equ	COM1 + 4	;COM1 - modem control register
+ 0025 =         COM1LSR	equ	COM1 + 5	;COM1 - line status register
+ 0026 =         COM1MSR	equ	COM1 + 6	;COM1 - modem status register
+ 0020 =         COM1DLS	equ	COM1		;COM1 - divisor latch (LS)
+ 0021 =         COM1DMS	equ	COM1 + 1	;COM1 - divisor latch (MS)
+ 0028 =         COM2	equ	28h		;COM2 base port address
+ 0028 =         COM2DAT	equ	COM2		;COM2 - data register
+ 002B =         COM2LCR	equ	COM2 + 3	;COM2 - line control register
+ 002C =         COM2MCR	equ	COM2 + 4	;COM2 - modem control register
+ 002D =         COM2LSR	equ	COM2 + 5	;COM2 - line status register
+ 002E =         COM2MSR	equ	COM2 + 6	;COM2 - modem status register
+ 0028 =         COM2DLS	equ	COM2		;COM2 - divisor latch (LS)
+ 0029 =         COM2DMS	equ	COM2 + 1	;COM2 - divisor latch (MS)
+ 0080 =         COMDLAB	equ	80h		;divisor latch access bit (DLAB)
+ 0001 =         COMDR	equ	01h		;data ready (DR)
+ 0020 =         COMTHRE	equ	20h		;transmit holding register empty (THRE)
+ 0001 =         COMDTR	equ	01h		;data terminal ready (DTR)
+ 0002 =         COMRTS	equ	02h		;request to send (RTS)
+ 0003 =         COM8N1	equ	03h		;8N1
+ 0040 =         COMSBRK	equ	40h		;Set Break
+ 0417 =         COM110	equ	1047		;110 baud rate
+ 0180 =         COM300	equ	384		;300 baud rate
+ 0060 =         COM1200	equ	96		;1200 baud rate
+ 0030 =         COM2400	equ	48		;2400 baud rate
+ 000C =         COM9600	equ	12		;9600 baud rate
+ 0006 =         COM192K	equ	6		;19.2K baud rate
+ 0003 =         COM384K	equ	3		;38.4K baud rate
+                
+                ;  Transfer related equates
+                
+ 0001 =         SOH	EQU	1
+ 0004 =         EOT	EQU	4
+ 0006 =         ACK	EQU	6
+ 0015 =         NAK	EQU	15H
+ 0003 =         CTRLC	EQU	3		;Control-C
+ 000A =         LF	EQU	10
+ 000D =         CR	EQU	13
+                
+ 0100           	ORG	100H
+                
+                ;  Verify a file name was specified
+                
+ 0100 3A5D00    	lda	PARAM1		;A=1st character of parameter 1
+ 0103 FE20      	cpi	' '		;make sure something entered
+ 0105 C21101    	jnz	havep1
+ 0108 116403    	lxi	d,mHelp		;display usage message
+ 010B 0E09      	mvi	c,print
+ 010D CD0500    	call	bdos
+ 0110 C9        	ret			;return to CPM
+                
+                ;  See if port "B" specified (2nd parameter)
+                
+ 0111 0600      havep1	mvi	b,0		;assume port b not used
+ 0113 111803    	lxi	d,mSendA	;port a send message
+ 0116 3A6D00    	lda	PARAM2		;A=1st character of parameter 2
+ 0119 E65F      	ani	5fh		;force upper case
+ 011B FE42      	cpi	'B'		;port b specified?
+ 011D C22401    	jnz	doXfer		;no, go do the transfer
+ 0120 04        	inr	b		;force flag to non-zero value
+ 0121 113A03    	lxi	d,mSendB	;port b send message
+                	
+                ;  doXfer - Switch to local stack and do the transfer
+                
+ 0124 78        doXfer	mov	a,b		;store the port b flag
+ 0125 328E04    	sta	fPortB
+ 0128 210000    	LXI	H,0		;HL=0
+ 012B 39        	DAD	SP		;HL=STACK FROM CP/M
+ 012C 228A04    	SHLD	STACK		;..SAVE IT
+ 012F 318A04    	LXI	SP,STACK	;SP=MY STACK
+ 0132 AF        	xra	a
+ 0133 328D04    	sta	SECTNO		;init sector number to zero
+ 0136 CD0703    	CALL	INIT$JAIR	;initialize the JAIR com ports
+ 0139 0E09      	MVI	C,PRINT		;print the send message
+ 013B CD0500    	CALL	BDOS		;PRINT ID MESSAGE
+                
+                ;  GOBBLE UP GARBAGE CHARS FROM THE LINE
+                
+ 013E 0601      purge	MVI	B,1		;times out after 1 second if no data
+ 0140 CD8E02    	CALL	RECV
+ 0143 DA4E01    	jc	RECEIVE$FILE	;line is clear, go receive the file
+ 0146 FE03      	cpi	ctrlc		;exit if abort requested
+ 0148 CA4904    	jz	abort
+ 014B C33E01    	jmp	purge
+                ;
+                ;**************RECEIVE FILE****************
+                ;
+                RECEIVE$FILE:
+ 014E CD2C02    	CALL	ERASE$OLD$FILE
+ 0151 CD3F02    	CALL	MAKE$NEW$FILE
+ 0154 3E15      	MVI	A,NAK
+ 0156 CDE702    	CALL	SEND		;SEND NAK
+                
+                RECV$LOOP:
+                RECV$HDR:
+ 0159 0603      	MVI	B,3		;3 SEC TIMEOUT
+ 015B CD8E02    	CALL	RECV
+ 015E D27101    	JNC	RHNTO		;NO TIMEOUT
+                
+                RECV$HDR$TIMEOUT:
+                RECV$SECT$ERR:			;PURGE THE LINE OF INPUT CHARS
+ 0161 0601      	MVI	B,1		;1 SEC W/NO CHARS
+ 0163 CD8E02    	CALL	RECV
+ 0166 D26101    	JNC	RECV$SECT$ERR 	;LOOP UNTIL SENDER DONE
+ 0169 3E15      	MVI	A,NAK
+ 016B CDE702    	CALL	SEND		;SEND NAK
+ 016E C35901    	JMP	RECV$HDR
+                
+                ;GOT CHAR - MUST BE SOH OR CTRL-C TO ABORT
+                
+ 0171 FE01      RHNTO:	CPI	SOH
+ 0173 CA8301    	JZ	GOT$SOH
+ 0176 FE03      	cpi	ctrlc		;control-c to abort?
+ 0178 CA4904    	jz	abort
+ 017B FE04      	CPI	EOT
+ 017D CA0002    	JZ	GOT$EOT
+ 0180 C36101    	JMP	RECV$SECT$ERR
+                
+                GOT$SOH:
+ 0183 0601      	MVI	B,1
+ 0185 CD8E02    	CALL	RECV
+ 0188 DA6101    	JC	RECV$HDR$TIMEOUT
+ 018B 57        	MOV	D,A		;D=BLK #
+ 018C 0601      	MVI	B,1
+ 018E CD8E02    	CALL	RECV		;GET CMA'D SECT #
+ 0191 DA6101    	JC	RECV$HDR$TIMEOUT
+ 0194 2F        	CMA
+ 0195 BA        	CMP	D		;GOOD SECTOR #?
+ 0196 CA9C01    	JZ	RECV$SECTOR
+ 0199 C36101    	JMP	RECV$SECT$ERR
+                
+                ;  Receive Sector
+                
+                RECV$SECTOR:
+ 019C 7A        	MOV	A,D		;GET SECTOR #
+ 019D 328C04    	STA	RSECTNO
+ 01A0 0E00      	MVI	C,0		;INIT CKSUM
+ 01A2 218000    	LXI	H,80H		;POINT TO BUFFER
+                RECV$CHAR:
+ 01A5 0601      	MVI	B,1		;1 SEC TIMEOUT
+ 01A7 CD8E02    	CALL	RECV		;GET CHAR
+ 01AA DA6101    	JC	RECV$HDR$TIMEOUT
+ 01AD 77        	MOV	M,A		;STORE CHAR
+ 01AE 2C        	INR	L		;DONE?
+ 01AF C2A501    	JNZ	RECV$CHAR
+                
+                ;VERIFY CHECKSUM
+                
+ 01B2 51        	MOV	D,C		;SAVE CHECKSUM
+ 01B3 0601      	MVI	B,1		;TIMEOUT
+ 01B5 CD8E02    	CALL	RECV		;GET CHECKSUM
+ 01B8 DA6101    	JC	RECV$HDR$TIMEOUT
+ 01BB BA        	CMP	D		;CHECK
+ 01BC C26101    	JNZ	RECV$SECT$ERR
+                ;
+                ;GOT A SECTOR, WRITE IF = 1+PREV SECTOR
+                ;
+ 01BF 3A8C04    	LDA	RSECTNO
+ 01C2 47        	MOV	B,A		;SAVE IT
+ 01C3 3A8D04    	LDA	SECTNO		;GET PREV
+ 01C6 3C        	INR	A		;CALC NEXT SECTOR #
+ 01C7 B8        	CMP	B		;MATCH?
+ 01C8 C2DD01    	JNZ	DO$ACK
+                
+                ;GOT NEW SECTOR - WRITE IT
+                
+ 01CB 115C00    	LXI	D,FCB
+ 01CE 0E15      	MVI	C,WRITE
+ 01D0 CD0500    	CALL	BDOS
+ 01D3 B7        	ORA	A
+ 01D4 C2E501    	JNZ	WRITE$ERROR
+ 01D7 3A8C04    	LDA	RSECTNO
+ 01DA 328D04    	STA	SECTNO		;UPDATE SECTOR #
+ 01DD 3E06      DO$ACK	MVI	A,ACK
+ 01DF CDE702    	CALL	SEND
+ 01E2 C35901    	JMP	RECV$LOOP
+                
+                WRITE$ERROR:
+ 01E5 CD8302    	CALL	ERXIT
+ 01E8 0D0A0A4572	DB	13,10,10,'Error Writing File',13,10,'$'
+                
+                GOT$EOT:
+ 0200 3E06      	MVI	A,ACK		;ACK THE EOT
+ 0202 CDE702    	CALL	SEND
+ 0205 115C00    	LXI	D,FCB
+ 0208 0E10      	MVI	C,CLOSE
+ 020A CD0500    	CALL	BDOS
+ 020D 3C        	INR	A
+ 020E C22F04    	JNZ	XFER$CPLT
+ 0211 CD8302    	CALL	ERXIT
+ 0214 0D0A0A4572	DB	13,10,10,'Error Closing File',13,10,'$'
+                ;
+                ERASE$OLD$FILE:
+ 022C 115C00    	LXI	D,FCB
+ 022F 0E11      	MVI	C,SRCHF		;SEE IF IT EXISTS
+ 0231 CD0500    	CALL	BDOS
+ 0234 3C        	INR	A		;FOUND?
+ 0235 C8        	RZ			;NO, RETURN
+ 0236 115C00    ERAY:	LXI	D,FCB
+ 0239 0E13      	MVI	C,ERASE
+ 023B CD0500    	CALL	BDOS
+ 023E C9        	RET
+                ;
+                MAKE$NEW$FILE:
+ 023F 115C00    	LXI	D,FCB
+ 0242 0E16      	MVI	C,MAKE
+ 0244 CD0500    	CALL	BDOS
+ 0247 3C        	INR	A		;FF=BAD
+ 0248 C0        	RNZ			;OPEN OK
+                
+                ;DIRECTORY FULL - CAN'T MAKE FILE
+ 0249 CD8302    	CALL	ERXIT
+ 024C 0D0A0A4572	DB	13,10,10,'Error - Can''t Make File',13,10
+ 0268 2864697265	DB	'(directory must be full)',13,10,'$'
+                ;
+                ; S U B R O U T I N E S
+                ;
+                ; - - - - - - - - - - - - - - -
+                
+                ;EXIT PRINTING MESSAGE FOLLOWING 'CALL ERXIT'
+                
+ 0283 D1        ERXIT	POP	D		;GET MESSAGE
+ 0284 0E09      	MVI	C,PRINT
+ 0286 CD0500    	CALL	BDOS		;PRINT MESSAGE
+ 0289 2A8A04    EXIT	LHLD	STACK		;GET ORIGINAL STACK
+ 028C F9        	SPHL			;RESTORE IT
+ 028D C9        	RET			;--EXIT-- TO CP/M
+                
+                ; - - - - - - - - - - - - - - -
+                ;MODEM RECV
+                ;-------------------------------------
+ 028E D5        RECV	PUSH	D		;SAVE
+ 028F 11009F    MSEC	lxi	d,(159 shl 8)	;49 cycle loop, 6.272ms/wrap * 159 = 1 second
+ 0292 3A8E04    	lda	fPortB		;using port B?
+ 0295 B7        	ora	a
+ 0296 C2B802    	jnz	MWTIB
+                
+                ;  port A input
+                
+ 0299 DB25      MWTI	IN	COM1LSR
+ 029B E601      	ANI	COMDR
+ 029D C2AF02    	JNZ	MCHAR		;GOT CHAR
+ 02A0 1D        	DCR	E		;COUNT DOWN
+ 02A1 C29902    	JNZ	MWTI		;FOR TIMEOUT
+ 02A4 15        	DCR	D
+ 02A5 C29902    	JNZ	MWTI
+ 02A8 05        	DCR	B		;DCR # OF SECONDS
+ 02A9 C28F02    	JNZ	MSEC
+                
+                ;MODEM TIMED OUT RECEIVING
+                
+ 02AC D1        	POP	D		;RESTORE D,E
+ 02AD 37        	STC			;CARRY SHOWS TIMEOUT
+ 02AE C9        	RET
+                
+                ;GOT MODEM CHAR
+                
+ 02AF DB20      MCHAR	IN	COM1DAT
+ 02B1 D1        	POP	D		;RESTORE DE
+ 02B2 F5        	PUSH	PSW		;CALC CHECKSUM
+ 02B3 81        	ADD	C
+ 02B4 4F        	MOV	C,A
+ 02B5 F1        	POP	PSW
+ 02B6 B7        	ORA	A		;TURN OFF CARRY TO SHOW NO TIMEOUT
+ 02B7 C9        	RET
+                
+                ;  port B input. Look for Ctrl-C on port A to abort
+                
+ 02B8 DB2D      MWTIB	IN	COM2LSR
+ 02BA E601      	ANI	COMDR
+ 02BC C2DE02    	JNZ	MCHARB		;GOT CHAR
+ 02BF 1D        	DCR	E		;COUNT DOWN
+ 02C0 C2B802    	JNZ	MWTIB		;FOR TIMEOUT
+ 02C3 DB25      	in	COM1LSR		;see if a ctrl-c pressed on console
+ 02C5 E601      	ani	COMDR		;character present?
+ 02C7 CAD302    	jz	noCtrlC		;no
+ 02CA DB20      	in	COM1DAT
+ 02CC FE03      	cpi	ctrlc		;is it a Ctrl-C?
+ 02CE C2D302    	jnz	noCtrlC		;no
+ 02D1 D1        	pop	d		;restore d,e
+ 02D2 C9        	ret			;carry is clear (no timeout), exit
+                
+ 02D3 15        noCtrlC	DCR	D
+ 02D4 C2B802    	JNZ	MWTIB
+ 02D7 05        	DCR	B		;DCR # OF SECONDS
+ 02D8 C28F02    	JNZ	MSEC
+                
+                ;MODEM TIMED OUT RECEIVING
+                
+ 02DB D1        	POP	D		;RESTORE D,E
+ 02DC 37        	STC			;CARRY SHOWS TIMEOUT
+ 02DD C9        	RET
+                
+                ;GOT MODEM CHAR
+                
+ 02DE DB28      MCHARB	IN	COM2DAT
+ 02E0 D1        	POP	D		;RESTORE DE
+ 02E1 F5        	PUSH	PSW		;CALC CHECKSUM
+ 02E2 81        	ADD	C
+ 02E3 4F        	MOV	C,A
+ 02E4 F1        	POP	PSW
+ 02E5 B7        	ORA	A		;TURN OFF CARRY TO SHOW NO TIMEOUT
+ 02E6 C9        	RET
+                
+                ; - - - - - - - - - - - - - - -
+                ;MODEM SEND CHAR ROUTINE
+                ;----------------------------------
+                ;
+ 02E7 F5        SEND	PUSH	PSW		;CHECK IF MONITORING OUTPUT
+ 02E8 81        	ADD	C		;CALC CKSUM
+ 02E9 4F        	MOV	C,A
+ 02EA 3A8E04    	lda	fPortB		;using port B?
+ 02ED B7        	ora	a
+ 02EE C2FC02    	jnz	SENDWB
+                
+                ; Use port A
+                
+ 02F1 DB25      SENDW	IN	COM1LSR
+ 02F3 E620      	ANI	COMTHRE
+ 02F5 CAF102    	JZ	SENDW
+ 02F8 F1        	POP	PSW		;GET CHAR
+ 02F9 D320      	OUT	COM1DAT
+ 02FB C9        	RET
+                
+                ; Use port B
+                
+ 02FC DB2D      SENDWB	IN	COM2LSR
+ 02FE E620      	ANI	COMTHRE
+ 0300 CAFC02    	JZ	SENDWB
+ 0303 F1        	POP	PSW		;GET CHAR
+ 0304 D328      	OUT	COM2DAT
+ 0306 C9        	RET
+                
+                ; INITITIALIZE THE COM PORT
+                
+                INIT$JAIR:
+ 0307 3A8E04    	lda	fPortB		;using port B (COM2)?
+ 030A B7        	ora	a
+ 030B C20F03    	jnz	initB		;yes
+                
+ 030E C9        	ret			;COM1 is initialized by CP/M
+                
+                ; initB - init port B instead
+                
+ 030F 3E03      initB	mvi	a,COM8N1	;8N1 and Clear DLAB
+ 0311 D32B      	out	COM2LCR
+                
+ 0313 3E03      	mvi	a,(COMDTR+COMRTS)
+ 0315 D32C      	out	COM2MCR
+                
+ 0317 C9        	ret
+                
+ 0318 53656E6420mSendA	db	'Send the file now using XMODEM...$'
+ 033A 53656E6420mSendB	db	'Send the file now using XMODEM on COM2...$'
+ 0364 0D0A504347mHelp	db	CR,LF,'PCGET Ver 1.3 for JAIR',CR,LF,LF
+ 037F 5265636569	db	'Receives a file from a PC through a JAIR',CR,LF
+ 03A9 7365726961	db	'serial port using the XMODEM protocol.',CR,LF,LF
+ 03D2 5573616765	db	'Usage: PCGET file.ext [B]',CR,LF
+ 03ED 202020434F	db	'   COM1 on JAIR used by default',CR,LF
+ 040E 2020205370	db	'   Specify B to use JAIR COM2.',CR,LF,'$'
+                
+                ;DONE - CLOSE UP SHOP
+                
+                XFER$CPLT:
+ 042F CD8302    	CALL	ERXIT
+ 0432 0D0A0A5472	DB	13,10,10,'Transfer Complete',13,10,'$'
+                
+ 0449 CD8302    abort:	call	erxit
+ 044C 0D0A0A5472	db	13,10,10,'Transfer Aborted',13,10,'$'
+                
+ 0462           	DS	40	;STACK AREA
+ 048A           STACK	DS	2	;STACK POINTER
+ 048C           RSECTNO	DS	1	;RECEIVED SECTOR NUMBER
+ 048D           SECTNO	DS	1	;CURRENT SECTOR NUMBER 
+ 048E           fPortB	ds	1	;flag to use JAIR port B instead of A
+                ;
+                ; BDOS EQUATES (VERSION 2)
+                ;
+ 0001 =         RDCON	EQU	1
+ 0002 =         WRCON	EQU	2
+ 0009 =         PRINT	EQU	9
+ 000B =         CONST	EQU	11	;CONSOLE STAT
+ 000F =         OPEN	EQU	15	;0FFH=NOT FOUND
+ 0010 =         CLOSE	EQU	16	;   "	"
+ 0011 =         SRCHF	EQU	17	;   "	"
+ 0012 =         SRCHN	EQU	18	;   "	"
+ 0013 =         ERASE	EQU	19	;NO RET CODE
+ 0014 =         READ	EQU	20	;0=OK, 1=EOF
+ 0015 =         WRITE	EQU	21	;0=OK, 1=ERR, 2=?, 0FFH=NO DIR SPC
+ 0016 =         MAKE	EQU	22	;0FFH=BAD
+ 0017 =         REN	EQU	23	;0FFH=BAD
+ 001A =         STDMA	EQU	26
+ 0005 =         BDOS	EQU	5
+ 0000 =         REIPL	EQU	0
+ 005C =         FCB	EQU	5CH	;DEFAULT FCB
+ 005D =         PARAM1	EQU	FCB+1	;COMMAND LINE PARAMETER 1 IN FCB
+ 006D =         PARAM2	EQU	PARAM1+16	;COMMAND LINE PARAMETER 2
+ 048F           	END
