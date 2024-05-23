@@ -1,0 +1,138 @@
+
+
+ 0005 =         BDOS	EQU	5
+ 005C =         FCB1	EQU	5CH	; CP/M FCB 1
+ 006C =         FCB2	EQU	6CH
+                
+ 000D =         CR	EQU	13
+ 000A =         LF	EQU	10
+                
+                ;-----------------------------
+                ; JAIR Serial Ports 
+                ;-----------------------------
+ 0020 =         COM1	equ	20h		;COM1 base port address
+ 0028 =         COM2	equ	28h		;COM2 base port address
+                
+ 0000 =         COMDLS	equ	0
+ 0001 =         COMDMS	equ	1
+ 0003 =         COMLCR	equ	3
+                
+ 0080 =         COMDLAB	equ	80h		;divisor latch access bit (DLAB)
+ 0003 =         COM8N1	equ	03h		;8N1
+ 0417 =         COM110	equ	1047		;110 baud rate
+ 0180 =         COM300	equ	384		;300 baud rate
+ 0060 =         COM1200	equ	96		;1200 baud rate
+ 0030 =         COM2400	equ	48		;2400 baud rate
+ 000C =         COM9600	equ	12		;9600 baud rate
+ 0006 =         COM192K	equ	6		;19.2K baud rate
+ 0003 =         COM384K	equ	3		;38.4K baud rate
+                
+                ;
+ 0100           	ORG	100H
+                
+                ;
+                ; Use CP/M stack
+                ;
+ 0100 3A6D00    	LDA	FCB2+1	;
+ 0103 FE31      	CPI	'1'	;COM1?
+ 0105 C20D01    	JNZ	BAUD
+                
+ 0108 3E20      	MVI	A,COM1
+ 010A 321702    	STA	PORT
+                
+ 010D 3A5D00    BAUD:	LDA	FCB1+1	;check for baud rate argument
+ 0110 FE20      	CPI	' '
+ 0112 CA8C01    	JZ	HELP	; PRINT HELP MSG IF NO FILES SPECIFIED
+                
+ 0115 FE31      	CPI	'1'
+ 0117 CA3201    	JZ	BAUD1
+                
+ 011A FE33      	CPI	'3'
+ 011C CA5001    	JZ	BAUD3
+                
+ 011F 213000    	LXI	H,COM2400
+ 0122 FE32      	CPI	'2'
+ 0124 CA6601    	JZ	SETBD
+                
+ 0127 210C00    	LXI	H,COM9600
+ 012A FE39      	CPI	'9'
+ 012C CA6601    	JZ	SETBD
+                
+ 012F C38C01    	JMP	HELP	;invalid baud rate
+                
+ 0132 3A5E00    BAUD1:	LDA	FCB1+2	;check for baud rate argument
+                
+ 0135 211704    	LXI	H,COM110
+ 0138 FE31      	CPI	'1'
+ 013A CA6601    	JZ	SETBD
+                
+ 013D 216000    	LXI	H,COM1200
+ 0140 FE32      	CPI	'2'
+ 0142 CA6601    	JZ	SETBD
+                
+ 0145 210600    	LXI	H,COM192K
+ 0148 FE39      	CPI	'9'
+ 014A CA6601    	JZ	SETBD
+                
+ 014D C38C01    	JMP	HELP	;invalid baud rate
+                
+ 0150 3A5E00    BAUD3:	LDA	FCB1+2	;check for baud rate argument
+                
+ 0153 218001    	LXI	H,COM300
+ 0156 FE30      	CPI	'0'
+ 0158 CA6601    	JZ	SETBD
+                
+ 015B 210300    	LXI	H,COM384K
+ 015E FE38      	CPI	'8'
+ 0160 CA6601    	JZ	SETBD
+                
+ 0163 C38C01    	JMP	HELP		;invalid baud rate
+                
+ 0166 0603      SETBD:	MVI	B,COMLCR	;set DLAB
+ 0168 0E80      	MVI	C,COMDLAB
+ 016A CD8101    	CALL	OUTP
+                
+ 016D 0600      	MVI	B,COMDLS	;divisor latch (LS)
+ 016F 4D        	MOV	C,L
+ 0170 CD8101    	CALL	OUTP
+                ;
+ 0173 0601      	MVI	B,COMDMS	;divisor latch (MS)
+ 0175 4C        	MOV	C,H
+ 0176 CD8101    	CALL	OUTP
+                
+ 0179 0603      	MVI	B,COMLCR	;clear DLAB
+ 017B 0E03      	MVI	C,COM8N1
+ 017D CD8101    	CALL	OUTP
+                
+ 0180 C9        	RET			;return to CP/M
+                ;
+                ; Output C to PORT + B
+                ;
+ 0181 3A1702    OUTP:	LDA	PORT
+ 0184 80        	ADD	B
+ 0185 328A01    	STA	OUTOP+1
+ 0188 79        	MOV	A,C
+                
+ 0189 D320      OUTOP:	OUT	COM1
+                
+ 018B C9        	RET
+                
+ 018C 119201    HELP:	LXI	D,HLPMSG
+ 018F C31202    	JMP	PRINT
+                
+ 0192 5345544241HLPMSG:	DB	'SETBAUD <BAUD> [1]',CR,LF
+ 01A6 4241554420	DB	'BAUD = 110, 300, 1200, 2400, 9600, 19200 or 38400',CR,LF
+ 01D9 0D0A      	DB	CR,LF
+ 01DB 536574204A	DB	'Set JAIR COM2 baud rate to BAUD. Specify 1 for COM1.',CR,LF,'$'
+                ;
+                ;	PRINT (MSG)
+                ;		DE^=MSG TERMIATED BY '$'
+ 0212 0E09      PRINT:	MVI	C,9
+ 0214 C30500    	JMP	BDOS
+                
+                ;
+                ;	DATA AREA
+                ;
+ 0217 28        PORT:	DB	COM2
+                
+ 0218           	END
