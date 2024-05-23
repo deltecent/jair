@@ -1,0 +1,79 @@
+xsub
+r os1boot.asm
+r os2ccp.asm
+r os3bdos.asm
+r cpmove.asm
+r header.asm
+mac header
+ren header0.hex=header.hex
+mac header $$pzsp+r
+ren header1.hex=header.hex
+mac os2ccp
+ren os2ccp0.hex=os2ccp.hex
+mac os2ccp $$pzsz+r
+ren os2ccp1.hex=os2ccp.hex
+era os2ccp.asm
+w *.hex
+w *.prn
+era *.prn
+era *.sym
+mac os3bdos
+ren os3bdos0.hex=os3bdos.hex
+w *.hex
+w *.prn
+era *.prn
+era *.sym
+mac os3bdos $$pzsz+r
+ren os3bdos1.hex=os3bdos.hex
+era os3bdos.asm
+
+ddt
+f100,1a00,0
+ios2ccp0.hex
+r100
+ios3bdos0.hex
+r100
+g0
+
+save 25 relcpm0.com
+genhex relcpm0 080
+
+ddt
+f100,1a00,0
+ios2ccp1.hex
+r0
+ios3bdos1.hex
+r0
+g0
+
+save 25 relcpm1.com
+genhex relcpm1 180
+pip cpm0.hex=header0.hex[i],relcpm0.hex[h]
+pip cpm1.hex=header1.hex[i],relcpm1.hex[h]
+pip relcpm.hex=cpm0.hex,cpm1.hex
+w *.hex
+genmod relcpm.hex relcpm.prl
+w *.prl
+mac cpmove
+
+ddt
+f100,2700,0
+icpmove.hex
+r
+irelcpm.prl
+r700
+g0
+
+save 38 movcpm.com
+
+era os*.*
+era rel*.*
+era cpm*.*
+era header*.*
+
+w movcpm.com
+
+movcpm 59
+save 33 cpm59.com
+w cpm59.com
+

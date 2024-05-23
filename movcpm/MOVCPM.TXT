@@ -1,0 +1,8 @@
+
+The CP/M BIOS for the JAIR is too large to fit on the
+standard CP/M boot tracks so it is contained in BIOS.HEX
+stored on the SD Card.
+
+MOVCPM will only resize the CCP and BDOS. BIOS.HEX will
+need to be reassembled to match the new memory size.
+
