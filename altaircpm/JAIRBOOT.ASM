@@ -1,4 +1,4 @@
-e****************************************************************************
+;****************************************************************************
 ;
 ;  CP/M cold boot loader for Altair CP/M using virtual Altair 8" floppy
 ;    drives served through the JAIR second serial port.
@@ -28,7 +28,7 @@ e****************************************************************************
 ;
 ;****************************************************************************
 
-MEMSIZE	equ	56		;set memory size in K bytes
+MEMSIZE	equ	63		;set memory size in K bytes
 
 ; 8" floppy equates
 
@@ -77,7 +77,8 @@ COM96 	equ	12		;9.6K baud rate
 COM192	equ	6		;19.2K baud rate
 COM384	equ	3		;38.4K baud rate
 COM576	equ	2		;57.6K baud rate
-
+BAUD	equ	COM576		;set COM2 baud rate
+				;>> DON'T FORGET TO UPDATE BANNER <<
 ;--------------------------------------------------------------------------
 ;  Entry point
 ;--------------------------------------------------------------------------
@@ -92,7 +93,7 @@ start	di			;disable interrupts
 
 	mvi	a,COM96		;set COM1 to 9.6K baud rate
 	out	COM1DLS
-	mvi	a,COM576	;set COM2 to 38.4K baud rate
+	mvi	a,BAUD		;set COM2 to baud rate
 	out	COM2DLS
 	mvi	a,0
 	out	COM1DMS
@@ -272,7 +273,7 @@ srbNew	pop	b		;restore BC
 ;---------------------------------------------------------------------------
 CSUMVAL	equ	'R'+'E'+'A'+'D'+(TRKLEN/256)+(TRKLEN AND 0FFh)
 
-banner	db	'JAIR Serial Server Boot Loader',0
+banner	db	'JAIR Serial Server Boot Loader (COM2 at 57.6K)',0
 readCmd	db	'READ'		;read command to server
 trkNum	db	0		;track number to read
 drvNum	db	0

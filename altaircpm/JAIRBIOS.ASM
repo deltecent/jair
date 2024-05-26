@@ -1,14 +1,9 @@
 ****************************************************************************
 ;
 ; CP/M 2.2 BIOS for MITS Altair 8800 and a virtual Altair 8" floppy
-;    drive served through an 88-2SIO serial port. The same PC based
+;    drive served through JAIR serial port COM2. The same PC based
 ;    disk server that supports the FDC+ can be used as the server for
 ;    this version of CP/M (use server version 1.4 or newer).
-;
-;    With Martin Eberhard’s 88-2SIOJP board, the baud rate can be as 
-;    high as 76.8K baud. At this rate, performance is the same as an
-;    original Altair CP/M versions from Lifeboat and Burcon running
-;    on an actual disk drive.
 ;
 ;    The same disk layout as used with the original versions of CP/M 1.4 
 ;    and 2.2 is maintained for full backward and forward compatibility.
@@ -35,6 +30,7 @@
 ;    Ver     Date	  Description
 ;    ---   ---------	---------------------
 ;    1.0   10/26/2023	Original, Mike Douglas
+;    1.0   05/26/2024	Modified for JAIR, Patrick Linstruth
 ;
 ;--------------------------------------------------------------------------
 ;
@@ -49,7 +45,7 @@
 ;
 ;****************************************************************************
 
-MEMSIZE	equ	56		;set memory size in K bytes
+MEMSIZE	equ	63		;set memory size in K bytes
 
 ;-----------------------------
 ; CP/M size & locations
@@ -125,7 +121,7 @@ FP	equ	0FFh		;front panel/programming output
 ; JAIR Serial Ports 
 ;-----------------------------
 COM1	equ	20h		;COM1 base port address
-COM1DAT	equ	COM1		;1st port on 2SIO board - data register
+COM1DAT	equ	COM1		;1st port on JAIR board - data register
 COM1LCR	equ	COM1 + 3	;COM1 - line control register
 COM1MCR	equ	COM1 + 4	;COM1 - modem control register
 COM1LSR	equ	COM1 + 5	;COM1 - line status register
@@ -133,7 +129,7 @@ COM1MSR	equ	COM1 + 6	;COM1 - modem status register
 COM1DLS	equ	COM1		;COM1 - divisor latch (LS)
 COM1DMS	equ	COM1 + 1	;COM1 - divisor latch (MS)
 COM2	equ	28h		;COM2 base port address
-COM2DAT	equ	COM2		;2nd port on 2SIO board - data register
+COM2DAT	equ	COM2		;2nd port on JAIR board - data register
 COM2LCR	equ	COM2 + 3	;COM2 - line control register
 COM2MCR	equ	COM2 + 4	;COM2 - modem control register
 COM2LSR	equ	COM2 + 5	;COM2 - line status register
@@ -230,32 +226,32 @@ fWRMCMD	equ	02h		;true = CCP process cmd on warm start
 ;	00 - TTY on SIO at I/O address 0
 ;	01 - CRT on JAIR COM1
 ;	10 - BAT indirect through RDR logical device
-;	11 - UC1 on JAIR COM2
+;	11 - UC1 on 2SIO port 1
 ;
 ;    RDR device (bits 3,2):
 ;	00 - TTY on SIO at I/O address 0
 ;	01 - PTR on JAIR COM1
 ;	10 - UR1 on cassette port (SIO 6/7)
-;	11 - UR2 on 2SIO port 2*
+;	11 - UR2 on 2SIO at port 1
 ;
 ;    PUN device (bits 5,4):
 ;	00 - TTY on SIO at I/O address 0
 ;	01 - PTP on JAIR COM1
 ;	10 - UP1 on cassette port (SIO 6/7)
-;	11 - UP2 on 2SIO port 2*
+;	11 - UP2 on 2SIO port 1
 ; 
 ;    LST device bits (7,6):
 ;	00 - TTY on SIO at I/O address 0
 ;	01 - CRT on JAIR COM1
 ;	10 - LPT on LPC board
-;	11 - UL1 on 2SIO port 2*
+;	11 - UL1 on 2SIO port 1
 ;
 ;  * Do not use (this is the disk server serial port)
 ;---------------------------------------------------------------------------
 dIoByte	db	055h		;CON = CRT (JAIR COM1)
 				;RDR = PTR (JAIR COM1)
 				;PUN = PTP (JAIR COM1)
-				;LST = UL1 (JAIR COM1)
+				;LST = UL1 (2SIO port 1)
 				
 ; sndNull flag (offset 35h)
 ;    Determines if a NULL should be transmitted following a CR when
@@ -1099,7 +1095,7 @@ conIn	call	invFlsh		;invalidate and flush track buffer
 	dw	sio1In		;TTY use 2SIO port 1
 	dw	com1In		;CRT use JAIR port 1
 	dw	reader		;BAT indirect through RDR logical device
-	dw	com2In		;UC1 use JAIR port 2
+	dw	com2In		;UC1 use 2SIO port 2
 
 ; conOut - Console output BIOS entry point. Output the character in C.
 ;   If the sndNull flags is true (i.e., it was determined during cold start
@@ -1123,7 +1119,7 @@ doConO	mvi	b,SHFTCON	;B=console IOBYTE alignment shift count
 	dw	sio1Out		;TTY use 2SIO port 1
 	dw	com1Out		;CRT use JAIR port 1
 	dw	list		;BAT indirect through LST logical device
-	dw	com2Out		;UC1 use JAIR port 2
+	dw	sio2Out		;UC1 use 2SIO port 2
 
 ;---------------------------------------------------------------------------
 ; RDR device - Reader input character BIOS entry point. Return in A
@@ -1135,7 +1131,7 @@ reader	mvi	b,SHFTRDR	;B=reader IOBYTE alignment shift count
 	dw	sio1In		;TTY use 2SIO port 1
 	dw	com1In		;PTR use JAIR port 1
 	dw	acrIn		;UR1 use cassette port (SIO 6/7)
-	dw	com2In		;UR2 use JAIR port 2 
+	dw	sio2In		;UR2 use 2SIO port 2 
 
 ;---------------------------------------------------------------------------
 ; PUN device - Punch output character BIOS entry point. Byte to send in C.
@@ -1146,7 +1142,7 @@ punch	mvi	b,SHFTPUN	;B=punch IOBYTE alignment shift count
 	dw	sio1Out		;TTY use 2SIO port 1
 	dw	com1Out		;PTP use JAIR port 1
 	dw	acrOut		;UP1 use cassette port (SIO 6/7)
-	dw	com2Out		;UP2 use JAIR port 2
+	dw	sio2Out		;UP2 use 2SIO port 2
 
 ;---------------------------------------------------------------------------
 ;  LST device I/O
@@ -1161,7 +1157,7 @@ listSt	mvi	b,SHFTLST	;B=list IOBYTE alignment shift count
 	dw	sio1OSt		;TTY use 2SIO port 1
 	dw	com1OSt		;CRT use JAIR port 1
 	dw	lpcOSt		;LPT use LPC board
-	dw	com2OSt		;UL1 use JAIR port 2
+	dw	sio2OSt		;UL1 use 2SIO port 2
 
 ; list - List output character BIOS entry point. Send the character
 ;    passed in C out the list port

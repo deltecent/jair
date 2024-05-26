@@ -1,6 +1,6 @@
 
 
-S               e****************************************************************************
+                ;****************************************************************************
                 ;
                 ;  CP/M cold boot loader for Altair CP/M using virtual Altair 8" floppy
                 ;    drives served through the JAIR second serial port.
@@ -30,7 +30,7 @@ S               e***************************************************************
                 ;
                 ;****************************************************************************
                 
- 0038 =         MEMSIZE	equ	56		;set memory size in K bytes
+ 003F =         MEMSIZE	equ	63		;set memory size in K bytes
                 
                 ; 8" floppy equates
                 
@@ -47,8 +47,8 @@ S               e***************************************************************
  0E00 =         BDOSLEN	equ	0E00h		;CPM 2.2 fixed length
  1800 =         BIOSLEN	equ	1800h		;length of BIOS for 8" floppy
                 
- B200 =         CCPBASE	equ	MEMSIZE*1024 - BIOSLEN - BDOSLEN - CCPLEN
- C800 =         BIOSBAS	equ	(CCPBASE+CCPLEN+BDOSLEN) ;base address of this BIOS
+ CE00 =         CCPBASE	equ	MEMSIZE*1024 - BIOSLEN - BDOSLEN - CCPLEN
+ E400 =         BIOSBAS	equ	(CCPBASE+CCPLEN+BDOSLEN) ;base address of this BIOS
                 
                 ;-----------------------------
                 ; JAIR Serial Ports 
@@ -79,14 +79,15 @@ S               e***************************************************************
  0006 =         COM192	equ	6		;19.2K baud rate
  0003 =         COM384	equ	3		;38.4K baud rate
  0002 =         COM576	equ	2		;57.6K baud rate
-                
+ 0002 =         BAUD	equ	COM576		;set COM2 baud rate
+                				;>> DON'T FORGET TO UPDATE BANNER <<
                 ;--------------------------------------------------------------------------
                 ;  Entry point
                 ;--------------------------------------------------------------------------
  0000           	org	0
                 
  0000 F3        start	di			;disable interrupts
- 0001 3100B2    	lxi	sp,CCPBASE	;stack grows down from lowest CPM address
+ 0001 3100CE    	lxi	sp,CCPBASE	;stack grows down from lowest CPM address
                 
  0004 3E80      	mvi	a,COMDLAB
  0006 D323      	out	COM1LCR
@@ -94,7 +95,7 @@ S               e***************************************************************
                 
  000A 3E0C      	mvi	a,COM96		;set COM1 to 9.6K baud rate
  000C D320      	out	COM1DLS
- 000E 3E02      	mvi	a,COM576	;set COM2 to 38.4K baud rate
+ 000E 3E02      	mvi	a,BAUD		;set COM2 to baud rate
  0010 D328      	out	COM2DLS
  0012 3E00      	mvi	a,0
  0014 D321      	out	COM1DMS
@@ -124,14 +125,14 @@ S               e***************************************************************
                 ; Load and move 1st track
                 
  0033 AF        load	xra	a		;track 0
- 0034 32FE00    	sta	trkNum
+ 0034 320E01    	sta	trkNum
  0037 3E4D      	mvi	a,CSUMVAL AND 0FFh  ;re-init checksum
- 0039 320201    	sta	chkSum
+ 0039 321201    	sta	chkSum
  003C CD8200    	call	readTrk		;read the track
  003F C23300    	jnz	load		;error
                 
- 0042 21A202    	lxi	h,trkBuf+(STRTSEC*PSECLEN)+SYSDATA   ;source pointer
- 0045 1100B2    	lxi	d,CCPBASE	;DE->where to put CP/M
+ 0042 21B202    	lxi	h,trkBuf+(STRTSEC*PSECLEN)+SYSDATA   ;source pointer
+ 0045 1100CE    	lxi	d,CCPBASE	;DE->where to put CP/M
  0048 0E1D      	mvi	c,NUMSEC-3	;sector count to move
                 
  004A CD7100    secLp1	call	movSec		;move 128 bytes to run location
@@ -140,22 +141,22 @@ S               e***************************************************************
                 
                 ; Load and move second track
                 
- 0051 21FE00    	lxi	h,trkNum	;move to track 1
+ 0051 210E01    	lxi	h,trkNum	;move to track 1
  0054 34        	inr	m
- 0055 210201    	lxi	h,chkSum	;update checksum
+ 0055 211201    	lxi	h,chkSum	;update checksum
  0058 34        	inr	m
  0059 CD8200    	call	readTrk		;read second track
  005C C23300    	jnz	load		;error
                 	
- 005F 210701    	lxi	h,trkBuf+SYSDATA   ;source pointer
- 0062 1180C0    	lxi	d,CCPBASE+CSECLEN*(NUMSEC-3)	;dest pointer
+ 005F 211701    	lxi	h,trkBuf+SYSDATA   ;source pointer
+ 0062 1180DC    	lxi	d,CCPBASE+CSECLEN*(NUMSEC-3)	;dest pointer
  0065 0E20      	mvi	c,NUMSEC	;sector count to move
                 
  0067 CD7100    secLp2	call	movSec		;move 128 bytes to run location
  006A 0D        	dcr	c		;decrement sector count		
  006B C26700    	jnz	secLp2
                 
- 006E C300C8    	jmp	BIOSBAS		;jump to BIOS cold start
+ 006E C300E4    	jmp	BIOSBAS		;jump to BIOS cold start
                 
                 ;--------------------------------------------------------------------------
                 ; movSec - Move 128 byte sector from trkBuf to RAM
@@ -193,7 +194,7 @@ S               e***************************************************************
                 ;    track read into trkBuf
                 ;    Clobbers all
                 ;----------------------------------------------------------------------------
- 0082 21FA00    readTrk	lxi	h,readCmd	;send read command to server
+ 0082 210A01    readTrk	lxi	h,readCmd	;send read command to server
  0085 060A      	mvi	b,CMDLEN	;B=count of bytes to send
  0087 3E2E      	mvi	a,'.'		;send '.' on console
  0089 D320      	out	COM1DAT
@@ -209,7 +210,7 @@ S               e***************************************************************
  0096 05        	dcr	b		;decrement byte count
  0097 C28B00    	jnz	waitSnd		;loop until command is sent
                 
- 009A 210401    	lxi	h,trkBuf	;receive track data into trkBuf
+ 009A 211401    	lxi	h,trkBuf	;receive track data into trkBuf
  009D 112011    	lxi	d,TRKLEN	;DE=length to read
  00A0 010000    	lxi	b,0		;BC=checksum
                 
@@ -274,14 +275,14 @@ S               e***************************************************************
                 ;---------------------------------------------------------------------------
  014D =         CSUMVAL	equ	'R'+'E'+'A'+'D'+(TRKLEN/256)+(TRKLEN AND 0FFh)
                 
- 00DB 4A41495220banner	db	'JAIR Serial Server Boot Loader',0
- 00FA 52454144  readCmd	db	'READ'		;read command to server
- 00FE 00        trkNum	db	0		;track number to read
- 00FF 00        drvNum	db	0
- 0100 2011      readLen	dw	TRKLEN
- 0102 4D01      chkSum	dw	CSUMVAL
+ 00DB 4A41495220banner	db	'JAIR Serial Server Boot Loader (COM2 at 57.6K)',0
+ 010A 52454144  readCmd	db	'READ'		;read command to server
+ 010E 00        trkNum	db	0		;track number to read
+ 010F 00        drvNum	db	0
+ 0110 2011      readLen	dw	TRKLEN
+ 0112 4D01      chkSum	dw	CSUMVAL
  000A =         CMDLEN	equ	$-readCmd
                 
- 0104 =         trkBuf	equ	$		;track buffer
+ 0114 =         trkBuf	equ	$		;track buffer
                 
- 0104           	end
+ 0114           	end
