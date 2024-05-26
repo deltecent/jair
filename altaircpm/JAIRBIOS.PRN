@@ -1,0 +1,1606 @@
+
+
+                ****************************************************************************
+                ;
+                ; CP/M 2.2 BIOS for MITS Altair 8800 and a virtual Altair 8" floppy
+                ;    drive served through an 88-2SIO serial port. The same PC based
+                ;    disk server that supports the FDC+ can be used as the server for
+                ;    this version of CP/M (use server version 1.4 or newer).
+                ;
+                ;    With Martin Eberhard’s 88-2SIOJP board, the baud rate can be as 
+                ;    high as 76.8K baud. At this rate, performance is the same as an
+                ;    original Altair CP/M versions from Lifeboat and Burcon running
+                ;    on an actual disk drive.
+                ;
+                ;    The same disk layout as used with the original versions of CP/M 1.4 
+                ;    and 2.2 is maintained for full backward and forward compatibility.
+                ;
+                ;    This version provides full IOBYTE support to allow use of a wider
+                ;    variety of standard Altair I/O boards. Search for "IOBYTE" in this
+                ;    source file for details.
+                ;
+                ;    This version looks for a Teletype on the console port during cold boot
+                ;    and if detected (based on baud rate), subsequently follows any CR to
+                ;    the console device with a NULL to give the Teletype carriage time to
+                ;    reach the left margin. The send null flag (sndNull) is located imme-
+                ;    diately following the MODE and IOBYTE in memory so it can be over-
+                ;    ridden if needed.
+                ;
+                ;		Item	  Offset from start of BIOS
+                ;		------	  ----------------------------------
+                ;		MODE	  33h (20B3h in memory after MOVCPM)
+                ;		IOBYTE	  34h (20B4h in memory after MOVCPM)
+                ;		SNDNULL	  35h (20B5h in memory after MOVCPM)
+                ;
+                ;    Version History
+                ;
+                ;    Ver     Date	  Description
+                ;    ---   ---------	---------------------
+                ;    1.0   10/26/2023	Original, Mike Douglas
+                ;
+                ;--------------------------------------------------------------------------
+                ;
+                ;    To patch changes made to this BIOS into a CP/M image saved from
+                ;    MOVCPM2S (e.g., CPMxx.COM), use the following commands:
+                ;
+                ;	A>DDT CPMxx.COM
+                ;	-IBIOS.HEX
+                ;	-Rxxxx      (where xxxx = BIAS computed below)
+                ;	-G0	    (Go zero, not "oh")
+                ;	A>SYSGEN
+                ;
+                ;****************************************************************************
+                
+ 0038 =         MEMSIZE	equ	56		;set memory size in K bytes
+                
+                ;-----------------------------
+                ; CP/M size & locations
+                ;-----------------------------
+ 0800 =         CCPLEN	equ	0800h		;CPM 2.2 fixed length
+ 0E00 =         BDOSLEN	equ	0E00h		;CPM 2.2 fixed length
+ 1800 =         BIOSLEN	equ	1800h		;length of this BIOS
+                
+ B200 =         CCPBASE	equ	MEMSIZE*1024 - BIOSLEN - BDOSLEN - CCPLEN
+ BA06 =         BDOSENT	equ	(CCPBASE+CCPLEN+6)	 ;entry address of BDOS
+ C800 =         BIOSBAS	equ	(CCPBASE+CCPLEN+BDOSLEN) ;base address of this BIOS
+                
+ 5880 =         BIAS	equ	0A80h-CCPBASE	;bias in DDT to patch in this BIOS
+                
+                ;-----------------------------
+                ; CP/M page zero equates
+                ;-----------------------------
+ 0000 =         WBOOTV	equ	00h		;warm boot vector location
+ 0005 =         BDOSV	equ	05h		;bdos entry vector location
+ 0004 =         CDISK	equ	04h		;CPM current disk
+ 0080 =         DEFDMA	equ	80h		;default dma address
+                
+ 0003 =         IOBYTE	equ	03h		;CPM IOBYTE address
+ 0001 =         SHFTCON	equ	1		;left rotate count to align CON in bits 2,1
+ 0007 =         SHFTRDR	equ	7		;left rotate count to align RDR in bits 2,1
+ 0005 =         SHFTPUN	equ	5		;left rotate count to align PUN in bits 2,1
+ 0003 =         SHFTLST	equ	3		;left rotate count to align LST in bits 2,1
+                
+                ;-----------------------------
+                ; Disk parameters
+                ;-----------------------------
+ 004D =         NUMTRK	equ	77		;number of tracks on the disk
+ 0020 =         NUMSEC	equ	32		;sectors per track
+ 0006 =         DATATRK	equ	6		;1st data format track
+ 0004 =         NUMDISK	equ	4		;four drives supported
+ 0080 =         CSECLEN	equ	128		;CP/M sector length
+ 0089 =         PSECLEN	equ	137		;physical sector length
+ 1120 =         TRKLEN	equ	NUMSEC*PSECLEN
+ 0003 =         WBSSEC	equ	3		;starting sector of CP/M image
+ 002C =         WBSECS	equ	(CCPLEN+BDOSLEN)/CSECLEN   ;# warm boot sectors to read
+                
+                ;-----------------------------
+                ; CP/M Disk Parameter Block Values
+                ;-----------------------------
+ 0004 =         BSH	equ	4		;allocation block shift factor (2K block)
+ 000F =         BLM	equ	0Fh		;allocation block mask (2K block)
+ 0000 =         EXM	equ	0		;extent mask
+ 0095 =         DSM	equ	149		;max block number (150 blocks of 2K bytes)
+ 003F =         DRM	equ	63		;max directory entry number (64 entries) 
+ 00C0 =         AL0	equ	0C0h		;directory allocation block bits byte 0
+ 0000 =         AL1	equ	0		;directory allocation block bits byte 1
+ 0002 =         RESTRK	equ	2		;reserved tracks for boot image
+ 0010 =         CKS	equ	(DRM+1)/4	;directory check space
+                
+                ; System tracks (0-5) sector format
+                
+ 0000 =         SYSTRK	equ	0		;offset of track number
+ 0003 =         SYSDATA	equ	3		;offset of 128 byte data payload
+ 0083 =         SYSSTOP	equ	131		;offset of stop byte (FFh)
+ 0084 =         SYSCSUM	equ	132		;offset of checksum
+                
+                ; Data tracks (6-76) sector format
+                
+ 0000 =         DATTRK	equ	0		;offset of track number
+ 0001 =         DATSEC	equ	1		;offset of sector number
+ 0004 =         DATCSUM	equ	4		;offset of checksum
+ 0007 =         DATDATA	equ	7		;offset of 128 byte data payload
+ 0087 =         DATSTOP	equ	135		;offset of stop byte (FFh)
+                
+ 00FF =         FP	equ	0FFh		;front panel/programming output
+                
+                ;-----------------------------
+                ; JAIR Serial Ports 
+                ;-----------------------------
+ 0020 =         COM1	equ	20h		;COM1 base port address
+ 0020 =         COM1DAT	equ	COM1		;1st port on 2SIO board - data register
+ 0023 =         COM1LCR	equ	COM1 + 3	;COM1 - line control register
+ 0024 =         COM1MCR	equ	COM1 + 4	;COM1 - modem control register
+ 0025 =         COM1LSR	equ	COM1 + 5	;COM1 - line status register
+ 0026 =         COM1MSR	equ	COM1 + 6	;COM1 - modem status register
+ 0020 =         COM1DLS	equ	COM1		;COM1 - divisor latch (LS)
+ 0021 =         COM1DMS	equ	COM1 + 1	;COM1 - divisor latch (MS)
+ 0028 =         COM2	equ	28h		;COM2 base port address
+ 0028 =         COM2DAT	equ	COM2		;2nd port on 2SIO board - data register
+ 002B =         COM2LCR	equ	COM2 + 3	;COM2 - line control register
+ 002C =         COM2MCR	equ	COM2 + 4	;COM2 - modem control register
+ 002D =         COM2LSR	equ	COM2 + 5	;COM2 - line status register
+ 002E =         COM2MSR	equ	COM2 + 6	;COM2 - modem status register
+ 0028 =         COM2DLS	equ	COM2		;COM2 - divisor latch (LS)
+ 0029 =         COM2DMS	equ	COM2 + 1	;COM2 - divisor latch (MS)
+ 0080 =         COMDLAB	equ	80h		;divisor latch access bit (DLAB)
+ 0001 =         COMDR	equ	01h		;data ready (DR)
+ 0020 =         COMTHRE	equ	20h		;transmit holding register empty (THRE)
+ 0001 =         COMDTR	equ	01h		;data terminal ready (DTR)
+ 0002 =         COMRTS	equ	02h		;request to send (RTS)
+ 0003 =         COM8BIT	equ	03h		;8 bits
+ 000C =         COM96	equ	12		;9.6K baud rate
+ 0006 =         COM192	equ	6		;19.2K baud rate
+ 0003 =         COM384	equ	3		;38.4K baud rate
+ 0002 =         COM576	equ	2		;57.6K baud rate
+                
+                ;-----------------------------
+                ; 2SIO Serial Board 
+                ;-----------------------------
+ 0010 =         SIO1CTL	equ	10h		;1st port on 2SIO board - control register
+ 0011 =         SIO1DAT	equ	11h		;1st port on 2SIO board - data register
+ 0012 =         SIO2CTL	equ	12h		;2nd port on 2SIO board - control register
+ 0013 =         SIO2DAT	equ	13h		;2nd port on 2SIO board - data register
+ 0001 =         SIORDRF	equ	01h		;read data register full flag
+ 0002 =         SIOTDRE	equ	02h		;transmit data register empty flag
+                
+                ;-----------------------------
+                ; Set serial server port here
+                ;-----------------------------
+ 0012 =         SRVRCTL	equ	SIO2CTL		;serial port for disk server
+ 0013 =         SRVRDAT	equ	SIO2DAT
+                
+                ;-----------------------------
+                ; SIO Serial Board 
+                ;-----------------------------
+ 0000 =         SIOCTL	equ	00h		;SIO board at 0 - control register
+ 0001 =         SIODAT	equ	01h		;SIO board at 0 - data register
+ 0006 =         ACRCTL	equ	06h		;SIO board at 6 - control register (cassette)
+ 0007 =         ACRDAT	equ	07h		;SIO board at 6 - data register (cassette)
+ 0001 =         SIORCV	equ	01h		;data received bit (inverted)
+ 0080 =         SIOXMT	equ	80h		;read to transmit (inverted)
+                
+                ;-----------------------------
+                ; LPC Line Printer Controller
+                ;-----------------------------
+ 0002 =         LPCCTL	equ	02h		;line printer control port
+ 0003 =         LPCDAT	equ	03h		;line printer data port
+ 0002 =         LPCBSY	equ	02h		;mask to test printer busy flag
+                
+                ;-----------------------------
+                ; Misc equates
+                ;-----------------------------
+ 0003 =         RDTRIES	equ	3		;read tries 
+ 0003 =         WRTRIES	equ	3		;write tries
+                
+ 00FF =         UNDEF	equ	0FFh		;undefined value
+ 000D =         CR	equ	13		;ascii for carriage return
+ 000A =         LF	equ	10		;ascii for line feed
+                
+ C800           	org	BIOSBAS
+                ;-----------------------------------------------------------------------------
+                ;  BIOS Entry Jump Table
+                ;-----------------------------------------------------------------------------
+ C800 C336C8    	jmp	boot		;cold start
+ C803 C38CC8    wbJump	jmp	wBoot		;warm start
+ C806 C342CB    	jmp	conSt		;console status
+ C809 C34FCB    	jmp	conIn		;console character in (and disk flush)
+ C80C C361CB    	jmp	conOut		;console character out
+ C80F C3A4CB    	jmp	list		;list character out
+ C812 C38ACB    	jmp	punch		;punch character out
+ C815 C37BCB    	jmp	reader		;reader character in
+ C818 C30DC9    	jmp	home		;move head to home position
+ C81B C3EBC8    	jmp	selDsk		;select disk
+ C81E C312C9    	jmp	setTrk		;set track number
+ C821 C317C9    	jmp	setSec		;set sector number
+ C824 C31DC9    	jmp	setDma		;set dma address
+ C827 C32AC9    	jmp	read		;read disk
+ C82A C35FC9    	jmp	write		;write disk
+ C82D C397CB    	jmp	listSt		;return list status
+ C830 C323C9    	jmp	secTran		;sector translate
+                
+                ;-----------------------------------------------------------------------------
+                ;  MODE byte flags (offset 33h)
+                ;-----------------------------------------------------------------------------
+ C833 00        mode	db	00h		;default mode byte
+ 0001 =         fCLDCMD	equ	01h		;true = CCP process cmd on cold start
+ 0002 =         fWRMCMD	equ	02h		;true = CCP process cmd on warm start
+                
+                ;---------------------------------------------------------------------------
+                ;  IOBYTE definition (offset 34h)
+                ;
+                ;    CON device (bits 1,0):
+                ;	00 - TTY on SIO at I/O address 0
+                ;	01 - CRT on JAIR COM1
+                ;	10 - BAT indirect through RDR logical device
+                ;	11 - UC1 on JAIR COM2
+                ;
+                ;    RDR device (bits 3,2):
+                ;	00 - TTY on SIO at I/O address 0
+                ;	01 - PTR on JAIR COM1
+                ;	10 - UR1 on cassette port (SIO 6/7)
+                ;	11 - UR2 on 2SIO port 2*
+                ;
+                ;    PUN device (bits 5,4):
+                ;	00 - TTY on SIO at I/O address 0
+                ;	01 - PTP on JAIR COM1
+                ;	10 - UP1 on cassette port (SIO 6/7)
+                ;	11 - UP2 on 2SIO port 2*
+                ; 
+                ;    LST device bits (7,6):
+                ;	00 - TTY on SIO at I/O address 0
+                ;	01 - CRT on JAIR COM1
+                ;	10 - LPT on LPC board
+                ;	11 - UL1 on 2SIO port 2*
+                ;
+                ;  * Do not use (this is the disk server serial port)
+                ;---------------------------------------------------------------------------
+ C834 55        dIoByte	db	055h		;CON = CRT (JAIR COM1)
+                				;RDR = PTR (JAIR COM1)
+                				;PUN = PTP (JAIR COM1)
+                				;LST = UL1 (JAIR COM1)
+                				
+                ; sndNull flag (offset 35h)
+                ;    Determines if a NULL should be transmitted following a CR when
+                ;    writing to the console device. This is automatically set during
+                ;    cold start based on the baud rate of the console device. A user
+                ;    can change this flag if needed after each cold start.
+                
+ C835 00        sndNull	db	0		;true if null should be sent after CR
+                
+                ;----------------------------------------------------------------------------
+                ; boot - Cold boot BIOS entry. CPM is already loaded in memory. Initialize
+                ;    serial ports, display welcome banner and enter the CCP.
+                ;----------------------------------------------------------------------------
+ C836 310001    boot	lxi	sp,0100h	;init stack pointer
+                
+ C839 CDBFCC    	call	serInit		;initialize serial ports and IOBYTE
+                
+ C83C CD33CB    	call	dispMsg		;display welcome message
+ C83F 0D0A0A    	db	CR,LF,LF
+ C842 3536      	db	MEMSIZE/10 + '0',MEMSIZE mod 10 + '0'
+ C844 4B2043502F	db	'K CP/M 2.2 v1.0 JAIR',CR,LF
+ C85A 466F722053	db	'For SERIAL Altair 8" Floppy',CR,LF,0
+                
+                				;dispMsg returns with A=0
+ C878 320400    	sta	CDISK		;current CPM disk is drive zero
+ C87B 3295CD    	sta	coldSt		;no longer in cold start
+                
+ C87E CDCCC8    	call	initCpm		;common cold/warm boot CPM initialization
+                
+ C881 3A33C8    	lda	mode		;see if cold start command line requested
+ C884 E601      	ani	fCLDCMD
+ C886 CA03B2    	jz	CCPBASE+3	;enter CCP and don't run command line
+                
+ C889 C300B2    	jmp	CCPBASE		;enter CCP with possible cmd line
+                
+                ;----------------------------------------------------------------------------
+                ; wBoot - Warm boot BIOS entry. Reload CPM from disk up to, but
+                ;    not including the BIOS. Re-enter CPM after loading.
+                ;----------------------------------------------------------------------------
+ C88C 310001    wBoot	lxi	sp,0100h	;init stack pointer
+ C88F AF        	xra	a		;boot from drive zero
+ C890 329ACD    	sta	drvNum
+ C893 01032C    	lxi	b,WBSECS*256+WBSSEC    ;B=secs to read, C=starting sec
+ C896 2100B2    	lxi	h,CCPBASE	;HL->CP/M load address
+                
+ C899 329BCD    wbTrk	sta	trkNum		;save track number to use
+                
+ C89C 229DCD    wbLoop	shld	dmaAddr		;set read destination
+ C89F 79        	mov	a,c		;set sector number from C
+ C8A0 329CCD    	sta	secNum
+                
+ C8A3 C5        	push	b		;save sector count and number
+ C8A4 CD2AC9    	call	read		;read next sector
+ C8A7 C1        	pop	b
+ C8A8 C28CC8    	jnz	wBoot		;failed read, start over
+                	
+ C8AB 05        	dcr	b		;decrement total sector count
+ C8AC CABEC8    	jz	warmCpm		;warm boot is done, warm enter CP/M
+                	
+ C8AF 0C        	inr	c		;bump to next sector number
+ C8B0 3E20      	mvi	a,NUMSEC	;A=number of sectors in a track
+ C8B2 91        	sub	c		;all sectors in track done?
+ C8B3 C29CC8    	jnz	wbLoop		;no, read next sector
+                	
+ C8B6 4F        	mov	c,a		;start with C=sector 0 on text track
+ C8B7 3A9BCD    	lda	trkNum		;increment track number
+ C8BA 3C        	inr	a
+                
+ C8BB C399C8    	jmp	wbTrk		;continue
+                
+ C8BE CDCCC8    warmCpm	call	initCpm		;common warm/cold boot CPM initialization
+                
+ C8C1 3A33C8    	lda	mode		;see if warm start command line requested
+ C8C4 E602      	ani	fWRMCMD
+ C8C6 CA03B2    	jz	CCPBASE+3	;enter CCP and don't run command line
+ C8C9 C300B2    	jmp	CCPBASE		;else, enter CCP with possible cmd line
+                
+                ;----------------------------------------------------------------------------
+                ; initCpm - Initialization for CPM that is common to both warm
+                ;    boot and cold boot.
+                ;----------------------------------------------------------------------------
+ C8CC 218000    initCpm	lxi	h,DEFDMA	;set the default dma address (80h)
+ C8CF 229DCD    	shld	dmaAddr
+                
+ C8D2 3EC3      	mvi	a,JMP		;8080 "jump" opcode
+ C8D4 320000    	sta	WBOOTV		;store in 1st byte of warm boot vector
+ C8D7 320500    	sta	BDOSV		;and 1st byte of bdos entry vector
+                
+ C8DA 2103C8    	lxi	h,wbJump	;get the warm boot jump address
+ C8DD 220100    	shld	WBOOTV+1	;and put it after the jump
+                
+ C8E0 2106BA    	lxi	h,BDOSENT	;BDOS entry address
+ C8E3 220600    	shld	BDOSV+1		;put it after the jump opcode
+                
+ C8E6 3A0400    	lda	CDISK		;get current disk number
+ C8E9 4F        	mov	c,a		;pass it to CPM in register C
+ C8EA C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; selDsk - Select Disk BIOS entry. C contains the disk number to select.
+                ;    Validate the disk number and return a pointer to the disk parameter
+                ;    header in HL. Zero is returned in HL for invalid drive number. The
+                ;    disk number is stored in drvNum. No drive activity takes place.
+                ;
+                ; On Entry
+                ;    C = disk number to select (or FFh, see Extended Functions below)
+                ;
+                ; On Exit
+                ;    drvNum = disk number to select
+                ;    Success: HL->DPH for this drive. Error: HL=0
+                ;    Clobbers A,D,E,H,L
+                ;----------------------------------------------------------------------------
+                ; selDsk is also used as the "Extended Function" entry point. If a drive
+                ;    number of FFh is passed in C, then this call is an extended function
+                ;    request and not a disk select request. In this case:
+                ;
+                ; On Entry
+                ;    C = FFh (extended function request)
+                ;    B = extended function number (see list below)
+                ;
+                ; On Exit
+                ;    H = 0, L = number of functions supported. This return value is neither
+                ;	the "invalid drive" response (HL=0) or a valid DPH pointer when a
+                ;    	drive is selected. This allows the caller to detect whether a
+                ;	BIOS supports extended functions or not.
+                ;    Z flag set true if the extended function executed without error, Z flag
+                ;	false otherwise.
+                ;    Clobbers All
+                ;
+                ;    Extended Functions supported by this BIOS:
+                ;	00h - Invalidate and flush track buffer.
+                ;----------------------------------------------------------------------------
+ C8EB 210000    selDsk	lxi	h,0		;init HL=0 for invalid drive request
+ C8EE 0C        	inr	c		;test for drive number of 0FFh
+ C8EF C2F9C8    	jnz	notExt		;not an extended function request
+                
+ C8F2 2C        	inr	l		;H=0, L=1 (number of functions supported)
+ C8F3 78        	mov	a,b		;A=extended function code
+ C8F4 B7        	ora	a		;code 0 = flush track buffer?
+ C8F5 CCB9CA    	cz	invFlsh		;yes, invalidate and flush track buffer
+ C8F8 C9        	ret			;exit with HL=1 and proper zero status
+                
+ C8F9 79        notExt	mov	a,c		;A=drive number + 1
+ C8FA 3D        	dcr	a		;A=drive number
+ C8FB FE04      	cpi	NUMDISK		;verify drive number less than number of disks
+ C8FD D0        	rnc			;invalid drive number, return with HL=0=error
+ C8FE 329ACD    	sta	drvNum		;else, save new drive number
+                
+ C901 07        	rlc			;compute disk parameter header address
+ C902 07        	rlc			;   as (16*drvNum) + dpHead
+ C903 07        	rlc
+ C904 07        	rlc			;A=16*drvNum
+ C905 2116CD    	lxi	h,dpHead  	;HL->start of disk parameter headers
+ C908 5F        	mov	e,a
+ C909 1600      	mvi	d,0
+ C90B 19        	dad	d		;HL->DPH for the passed drive number
+ C90C C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; home - Home BIOS entry. Set trkNum to zero. No drive activity takes place.
+                ;
+                ; On Entry
+                ;
+                ; On Exit
+                ;    trkNum set to zero
+                ;    Clobbers A
+                ;----------------------------------------------------------------------------
+ C90D AF        home	xra	a		;set trkNum to zero
+ C90E 329BCD    	sta	trkNum
+ C911 C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; setTrk - Set Track BIOS entry. C contains the desired track number.
+                ;    The track number is saved in trkNum for later use.
+                ;
+                ; On Entry
+                ;    C = track number to set
+                ;
+                ; On Exit
+                ;    trkNum = track specified in C
+                ;    Clobbers A
+                ;----------------------------------------------------------------------------
+ C912 79        setTrk	mov	a,c		;save track number passed in C
+ C913 329BCD    	sta	trkNum
+ C916 C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; setSec - Set Sector BIOS entry. C contains the 1-indexed CPM physical 
+                ;   sector. Saved in secNum as a zero-indexed value.  
+                ;
+                ; On Entry
+                ;    C = 1-indexed sector number to set
+                ;
+                ; On Exit
+                ;    secNum = zero-indexed sector number
+                ;    Clobbers A
+                ;----------------------------------------------------------------------------
+ C917 79        setSec	mov	a,c		;A=1-indexed sector number
+ C918 3D        	dcr	a		;convert to zero indexed
+ C919 329CCD    	sta	secNum
+ C91C C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; setDma - Set DMA BIOS entry. BC contains the address for reading or
+                ;    writing sector data for subsequent I/O operations. The address is
+                ;    stored in dmaAddr.
+                ;
+                ; On Entry
+                ;    BC = I/O buffer address
+                ;
+                ; On Exit
+                ;    dmaAddr = address specified in BC
+                ;    Clobbers H,L
+                ;----------------------------------------------------------------------------
+ C91D 60        setDma	mov	h,b		;save buffer address passed in BC
+ C91E 69        	mov	l,c
+ C91F 229DCD    	shld	dmaAddr
+ C922 C9        	ret
+                	
+                ;----------------------------------------------------------------------------
+                ; secTran - Sector translation BIOS entry. Convert zero-indexed logical 
+                ;    sector number in BC to a CPM one-indexed physical sector number in HL
+                ;    based on the translate table passed in DE.
+                ;
+                ; On Entry
+                ;    BC = logical sector number
+                ;    DE->sector translate table for selected drive
+                ;
+                ; On Exit
+                ;    HL = physical sector number
+                ;    Clobbers B,D,E,H,L
+                ;----------------------------------------------------------------------------
+ C923 EB        secTran	xchg			;HL->translate table
+ C924 0600      	mvi	b,0		;make sure msb of sector is zero
+ C926 09        	dad	b		;HL->translated sector num
+ C927 6E        	mov	l,m		;L=lsb of sector
+ C928 60        	mov	h,b		;H=0=msb of sector
+ C929 C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; read - Read sector BIOS entry. Read one sector using the drvNum, 
+                ;    trkNum, secNum, and dmaAddr previously specified.
+                ;
+                ; On Entry
+                ;    drvNum = drive to read from
+                ;    trkNum = track to read from
+                ;    secNum = sector number to read (0-31)
+                ;    dmaAddr = address of buffer to read into
+                ;
+                ; On Exit
+                ;    If read successful
+                ;	sector read into (dmaAddr)
+                ;	HL = (dmaAddr) + CSECLEN
+                ;	A=0, Z flag set true
+                ;    Else
+                ;	A=1, Z flag set false
+                ;    Interrupts enabled
+                ;    Clobbers all
+                ;----------------------------------------------------------------------------
+ C92A CD1ECA    read	call	ckFlush		;flush track buffer if needed
+ C92D CDD8C9    	call	readTrk		;fill track buffer if needed
+ C930 C236C9    	jnz	exitDio		;track read error, exit
+                	
+ C933 CD3BC9    	call	movRead		;move sector to (dmaAddr)
+                
+ C936 3E00      exitDio	mvi	a,0		;if zero is true, return zero
+ C938 C8        	rz
+ C939 3C        	inr	a		;else return A<>0, Z false
+ C93A C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; movRead - Move sector data from track buffer to (dmaAddr) for a
+                ;    CPM read request
+                ;
+                ; On Entry
+                ;    trkNum = track to read
+                ;    secNum = sector number to read (0-31)
+                ;    dmaAddr = address of buffer to read into
+                ;
+                ; On Exit
+                ;    sector data moved to (dmaAddr), Z flag set true
+                ;    HL = (dmaAddr) + CSECLEN
+                ;    Clobbers all
+                ;----------------------------------------------------------------------------
+ C93B CDBBC9    movRead	call	altSkew		;secNum to hard sector in A
+ C93E CDCBC9    	call	sec2Adr		;HL->sector in trkBuf
+                	
+ C941 110700    	lxi	d,DATDATA	;DE=offset to data portion of sector
+ C944 3A9BCD    	lda	trkNum		;on a data track?
+ C947 FE06      	cpi	DATATRK
+ C949 D24FC9    	jnc	mrMove		;yes, data track (DE already correct)
+ C94C 110300    	lxi	d,SYSDATA	;else, use system track offset
+                
+ C94F 19        mrMove	dad	d		;HL->data portion of sector
+ C950 EB        	xchg			;DE->data portion of sector
+ C951 2A9DCD    	lhld	dmaAddr		;HL->destination for data
+ C954 0680      	mvi	b,CSECLEN	;B=number of bytes to move
+                	
+ C956 1A        mrLoop	ldax	d		;move sector from trkBuf to (dmaAddr) 
+ C957 77        	mov	m,a
+ C958 23        	inx	h		;increment pointers
+ C959 13        	inx	d
+ C95A 05        	dcr	b		;loop count
+ C95B C256C9    	jnz	mrLoop 
+                
+ C95E C9        	ret			;exit with zero	status
+                
+                ;----------------------------------------------------------------------------
+                ; write - Write sector BIOS entry. Write one sector using the drvNum,
+                ;    trkNum, secNum and dmaAddr specified. 
+                ;
+                ; On Entry
+                ;    drvNum = drive to write
+                ;    trkNum = track to write
+                ;    secNum = sector number to write (0-31)
+                ;    dmaAddr = address of buffer to write from
+                ;
+                ; On Exit
+                ;    If successful
+                ;	sector written to trkBuf from (dmaAddr)
+                ;	A=0, Z flag set true
+                ;    Else
+                ;	A=1, Z flag set false
+                ;    Interrupts enabled
+                ;    Clobbers all
+                ;----------------------------------------------------------------------------
+ C95F CD1ECA    write	call	ckFlush		;flush track buffer if needed
+ C962 CDD8C9    	call	readTrk		;fill track buffer if needed
+ C965 C236C9    	jnz	exitDio		;track read error, exit
+                
+ C968 CDBBC9    	call	altSkew		;secNum to hard sector in A
+ C96B CDCBC9    	call	sec2Adr		;HL->sector in trkBuf
+                
+ C96E 3A9BCD    	lda	trkNum		;A=track
+ C971 F680      	ori	80h		;set sync bit
+ C973 77        	mov	m,a		;set track in sector
+                	
+ C974 23        	inx	h		;HL->byte after track
+ C975 FE86      	cpi	DATATRK+80h	;on a system or data track?
+ C977 D28AC9    	jnc	wDatTrk		;data track 6-76
+                
+                ; Create Altair sector for system tracks 0-5
+                
+ C97A AF        	xra	a		;put 0100h (16 bit) at offset 1,2
+ C97B 77        	mov	m,a
+ C97C 23        	inx	h		;HL->offset 2
+ C97D 3C        	inr	a		;A=1
+ C97E 77        	mov	m,a
+                	
+ C97F 23        	inx	h		;HL->128 byte CPM sector in Altair sector
+ C980 CDA8C9    	call	wrtMove		;move (dmaAddr) to sector in trkBuf
+                	
+ C983 36FF      	mvi	m,0FFh		;offset 131 is stop byte (0FFh)
+                	
+ C985 23        	inx	h		;offset 132 is checksum
+ C986 70        	mov	m,b		;store checksum at offset 132
+ C987 C3A1C9    	jmp	wExit		;exit
+                
+                ; wDatTrk- Create Altair sector for tracks 6-76 (mindisk 4-34)
+                
+ C98A 3A9CCD    wDatTrk	lda	secNum		;A=sector before Altair skew
+ C98D 77        	mov	m,a		;store Altair logical sector number
+                	
+ C98E 23        	inx	h		;HL->offset 2 in sector
+ C98F AF        	xra	a		;store zero at offsets 2-6
+ C990 77        	mov	m,a		;offset 2
+                	
+ C991 23        	inx	h
+ C992 77        	mov	m,a		;zero at offset 3
+                	
+ C993 23        	inx	h
+ C994 E5        	push	h		;save address of offset 4 = checksum
+                	
+ C995 23        	inx	h
+ C996 77        	mov	m,a		;zero at offset 5
+                	
+ C997 23        	inx	h
+ C998 77        	mov	m,a		;zero at offset 6
+                	
+ C999 23        	inx	h		;HL->128 byte CPM sector in Altair sector
+ C99A CDA8C9    	call	wrtMove		;move (dmaAddr) to sector in trkBuf
+                
+ C99D 36FF      	mvi	m,0FFh		;offset 135 is stop byte (0FFh)
+                	
+ C99F E1        	pop	h		;HL->checksum byte in Altair sector
+ C9A0 70        	mov	m,b		;store the checksum
+                	
+                ; wExit - set dirty flag true, return success status
+                
+ C9A1 3EFF      wExit	mvi	a,0FFh		;set dirty flag true
+ C9A3 3296CD    	sta	bfDirty
+ C9A6 AF        	xra	a		;return success status
+ C9A7 C9        	ret
+                
+                ;------------------------------------------------------------------------------
+                ; wrtMove - Move sector buffer (128 bytes) from (dmaAddr) to (HL) as part
+                ;   of a CPM write command. Compute checksum on all bytes moved and return
+                ;   the checksum in B.
+                ;
+                ; On Entry
+                ;    HL->destination sector in trkBuf
+                ;    dmaAddr = address of buffer to move from
+                ;
+                ; On Exit
+                ;    128 bytes moved from (dmaAddr) to (HL)
+                ;    HL = HL + 128
+                ;    B = checksum of the 128 bytes moved
+                ;    Clobbers all
+                ;------------------------------------------------------------------------------
+ C9A8 EB        wrtMove	xchg			;DE->destination CPM sector in trkBuf
+ C9A9 2A9DCD    	lhld	dmaAddr		;HL->source buffer
+ C9AC 018000    	lxi	b,CSECLEN	;B=checksum (0), C=128 byte count
+                	
+ C9AF 7E        mwLoop	mov	a,m		;move from (HL) to (DE)
+ C9B0 12        	stax	d
+ C9B1 80        	add	b		;add byte to checksum
+ C9B2 47        	mov	b,a
+                	
+ C9B3 13        	inx	d		;increment both pointers
+ C9B4 23        	inx	h
+ C9B5 0D        	dcr	c		;decrement character count
+ C9B6 C2AFC9    	jnz	mwLoop		;loop until count = 0
+                	
+ C9B9 EB        	xchg			;return with buffer pointer in HL	
+ C9BA C9        	ret
+                	
+                ;----------------------------------------------------------------------------
+                ; altSkew - Perform Altair skew on the sector number in secNum and return
+                ;    the result in A. The skew is based on the track as:
+                ;
+                ;	Tracks 0-5, secOut = secIn
+                ;	Tracks 6-76, secOut = (secIn * 17) MOD 32
+                ;
+                ;    The skew computation for tracks 6-76 is implemented as:
+                ;	secOut = secIn if secIn is even
+                ;	secOut = secIn XOR 10h if secIn is odd
+                ;
+                ; On Entry
+                ;    trkNum = current track
+                ;    secNum = sector number (0-31)
+                ;
+                ; On Exit
+                ;    A = sector number after Altair skew
+                ;    Clobbers A,B
+                ;----------------------------------------------------------------------------	
+ C9BB 3A9BCD    altSkew	lda	trkNum		;on a data track?
+ C9BE FE06      	cpi	DATATRK
+ C9C0 3A9CCD    	lda	secNum		;A=unmodified sector number
+ C9C3 D8        	rc			;system track, no change to sector
+                	
+ C9C4 47        	mov	b,a		;save secNum in B
+ C9C5 0F        	rrc			;test for even/odd
+ C9C6 78        	mov	a,b		;restore secNum in A
+ C9C7 D0        	rnc			;return with secNum if even	
+ C9C8 EE10      	xri	10h		;else translate as in comments above
+ C9CA C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; sec2Adr - Convert hard sector in A to address within trkBuf for
+                ;    the specified sector
+                ;
+                ; On Entry
+                ;    A = Hard sector number
+                ;
+                ; On Exit
+                ;    HL->sector buffer in trkBuf
+                ;    Clobbers A,B,C,H,L
+                ;---------------------------------------------------------------------------
+ C9CB 21D6CC    sec2Adr	lxi	h,secAddr  	;HL->sector address table
+ C9CE 0600      	mvi	b,0		;form BC=sector*2
+ C9D0 07        	rlc			;A=sector*2 (2 bytes per table entry)
+ C9D1 4F        	mov	c,a		;BC=sector*2
+ C9D2 09        	dad	b		;HL->address table entry for passed sector
+                	
+ C9D3 7E        	mov	a,m		;A=lsb of sector buffer address
+ C9D4 23        	inx	h
+ C9D5 66        	mov	h,m		;H=msb of sector buffer address
+ C9D6 6F        	mov	l,a		;HL->sector buffer
+ C9D7 C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; readTrk- read full track into track buffer if the requested 
+                ;    drive (drvNum) or track (trkNum) does not match the buffered
+                ;    drive (bfDrive) or buffered track (bfTrack). The status byte
+                ;    at the start of each sector is set to zero if the sector is
+                ;    good, non-zero if the sector couldn't be read.
+                ;
+                ; On Entry
+                ;    drvNum = drive to read
+                ;    trkNum = track to read
+                ;    bfDrive = drive from which trkBuf was filled
+                ;    bfTrack = track from which trkBuf was filled
+                ;
+                ; On Exit
+                ;    trkNum on drvNum read into trkBuf
+                ;    Zero true if track read or already there, zero false otherwise
+                ;    Clobbers all
+                ;----------------------------------------------------------------------------
+ C9D8 2A97CD    readTrk	lhld	bfDrive		;L=buffered drive, H=buffered track
+ C9DB 3A9ACD    	lda	drvNum		;A=requested drive
+ C9DE BD        	cmp	l		;same drive buffered?
+ C9DF C2E7C9    	jnz	rtNew		;drive doesn't match, need a new buffer
+                
+ C9E2 3A9BCD    	lda	trkNum		;A=requested track
+ C9E5 BC        	cmp	h		;same track buffered?
+ C9E6 C8        	rz			;yes, already have this buffer
+                
+                ; rtNew - New track needs to be read
+                
+ C9E7 3EFF      rtNew	mvi	a,UNDEF		;invalidate buffered data
+ C9E9 3297CD    	sta	bfDrive
+ C9EC 3E03      	mvi	a,RDTRIES	;init retry counter
+ C9EE 329FCD    	sta	rtryCnt
+                
+ C9F1 3A9ACD    rtRetry	lda	drvNum		;A=drive to read
+ C9F4 219BCD    	lxi	h,trkNum	;B=track to read
+ C9F7 46        	mov	b,m
+ C9F8 2185CD    	lxi	h,readCmd	;send read command to server
+ C9FB CDC4CA    	call	srvrCmd
+                
+ C9FE 21B4CE    	lxi	h,trkBuf	;receive track data into trkBuf
+ CA01 112011    	lxi	d,TRKLEN	;length to read
+ CA04 CDFACA    	call	srvrRcv
+ CA07 C215CA    	jnz	rtErr		;error	
+                
+ CA0A 2A9ACD    	lhld	drvNum		;L=drvNum, H=trkNum
+ CA0D 2297CD    	shld	bfDrive		;set the buffered drive and track values
+ CA10 7D        	mov	a,l		;save copy of drive number
+ CA11 3299CD    	sta	bfDrvSv
+ CA14 C9        	ret			;exit with Z flag true
+                
+ CA15 219FCD    rtErr	lxi	h,rtryCnt	;else retry
+ CA18 35        	dcr	m
+ CA19 C2F1C9    	jnz	rtRetry
+                
+ CA1C 34        	inr	m		;exit with non-zero error status
+ CA1D C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; ckFlush - Check if track buffer should be flushed. This
+                ;    function must be called before any drive selection or seek
+                ;    operation. The buffer is flushed if the bfDirty flag is
+                ;    set and the drive or track number are different than the
+                ;    buffered track.
+                ;
+                ; On Entry
+                ;    Drive still selected and on same track as in trkBuf
+                ;    drvNum, trkNum updated for the new I/O call
+                ;
+                ; On Exit
+                ;    Zero true for no error, zero false if write error occured
+                ;    Clobbers all
+                ;----------------------------------------------------------------------------
+ CA1E 3A96CD    ckFlush	lda	bfDirty		;see if track buffer is dirty
+ CA21 B7        	ora	a
+ CA22 C8        	rz			;no, exit with Z set
+                
+ CA23 2A97CD    	lhld	bfDrive		;L=buffered drive, H=buffered track
+ CA26 3A9ACD    	lda	drvNum		;A=requested drive number
+ CA29 BD        	cmp	l		;same drive?
+ CA2A C232CA    	jnz	wrtTrk		;no, flush
+                
+ CA2D 3A9BCD    	lda	trkNum		;A=requested track number
+ CA30 BC        	cmp	h		;same track?
+ CA31 C8        	rz			;yes, no need to flush
+                
+ CA32 AF        wrtTrk	xra	a		;clear buffer dirty flag
+ CA33 3296CD    	sta	bfDirty
+ CA36 3E03      	mvi	a,WRTRIES	;init retry counter
+ CA38 329FCD    	sta	rtryCnt
+                
+ CA3B 3A99CD    wtRetry	lda	bfDrvSv		;A=buffered data drive number
+ CA3E 2198CD    	lxi	h,bfTrack	;B=buffered data track number
+ CA41 46        	mov	b,m
+ CA42 218DCD    	lxi	h,wrtCmd	;send write command to server
+ CA45 CDC4CA    	call	srvrCmd
+                
+ CA48 21A0CD    	lxi	h,cmdResp	;receive write response
+ CA4B 110800    	lxi	d,CMDLEN
+ CA4E CDFACA    	call	srvrRcv
+ CA51 C295CA    	jnz	wtErr		;error	
+                
+ CA54 3AA0CD    	lda	cmdResp		;verify 'WRIT' received
+ CA57 FE57      	cpi	'W'
+ CA59 C295CA    	jnz	wtErr
+ CA5C 3AA1CD    	lda	cmdResp+1
+ CA5F FE52      	cpi	'R'
+ CA61 C295CA    	jnz	wtErr
+                
+ CA64 3AA4CD    	lda	crCode		;A=response code
+ CA67 B7        	ora	a		;zero = 'OK'
+ CA68 C295CA    	jnz	wtErr
+                
+ CA6B 21B4CE    	lxi	h,trkBuf	;send track buffer to write	
+ CA6E 112011    	lxi	d,TRKLEN
+ CA71 CDD4CA    	call	srvrSnd
+                
+ CA74 21A0CD    	lxi	h,cmdResp	;receive write response
+ CA77 110800    	lxi	d,CMDLEN
+ CA7A CDFACA    	call	srvrRcv
+ CA7D C295CA    	jnz	wtErr		;error	
+                
+ CA80 3AA0CD    	lda	cmdResp		;verify 'WSTA' received
+ CA83 FE57      	cpi	'W'
+ CA85 C295CA    	jnz	wtErr
+ CA88 3AA1CD    	lda	cmdResp+1
+ CA8B FE53      	cpi	'S'
+ CA8D C295CA    	jnz	wtErr
+                
+ CA90 3AA4CD    	lda	crCode		;A=response code
+ CA93 B7        	ora	a		;zero = 'OK'
+ CA94 C8        	rz
+                
+ CA95 219FCD    wtErr	lxi	h,rtryCnt	;decrement the write retry counter
+ CA98 35        	dcr	m
+ CA99 C23BCA    	jnz	wtRetry		;retry the write
+                
+ CA9C CD33CB    	call	dispMsg
+ CA9F 0D0A44656C	db	CR,LF,'Delayed Write Error', CR, LF, 0
+                
+ CAB7 3C        	inr	a		;dispMsg returns zero
+ CAB8 C9        	ret			;exit with non-zero
+                
+                ;------------------------------------------------------------------------------
+                ; invFlush - Invalidate and flush the track buffer.
+                ;    Console input is used as an idle indicator and as a good time
+                ;    to flush a dirty track buffer, so the conIn function calls this
+                ;    subroutine. Even if not flushed, the track buffer is invalidated
+                ;    to force a track read on the next disk I/O request. This helps
+                ;    catch a disk swap.
+                ;
+                ; On Entry:
+                ;    Same drive is on the same track as buffered in trkBuf
+                ;
+                ; On Exit:
+                ;    Track buffer written if required and invalidated.
+                ;    Head unloaded
+                ;    Z set for no error, Z cleared if write error occured.
+                ; Clobbers all except HL
+                ;------------------------------------------------------------------------------
+ CAB9 E5        invFlsh	push	h		;preserve h
+ CABA 2197CD    	lxi	h,bfDrive
+ CABD 36FF      	mvi	m,UNDEF		;invalidate the track buffer
+ CABF CD1ECA    	call	ckFlush		;flush the track if needed
+ CAC2 E1        	pop	h
+ CAC3 C9        	ret
+                
+                ;------------------------------------------------------------------------------
+                ; srvrCmd - Send command pointed to by HL to the serial disk server.
+                ;    Computes and sends the checksum as well.
+                ;
+                ; On Entry:
+                ;    HL->command string to send
+                ;    A=Drive number
+                ;    B=Track number
+                ;
+                ; On Exit:
+                ;
+                ; Clobbers all
+                ;------------------------------------------------------------------------------
+ CAC4 E5        srvrCmd	push	h		;preserve command pointer
+ CAC5 07        	rlc			;put drive in upper nibble
+ CAC6 07        	rlc
+ CAC7 07        	rlc
+ CAC8 07        	rlc
+ CAC9 110500    	lxi	d,rcDrive-readCmd    ;DE=offset to drive number
+ CACC 19        	dad	d
+ CACD 77        	mov	m,a		;store drive number in command
+                
+ CACE 2B        	dcx	h		;move to track number
+ CACF 70        	mov	m,b		;store track number in command
+                	
+ CAD0 E1        	pop	h		;restore command pointer
+ CAD1 110800    	lxi	d,CMDLEN	;DE=length to send
+                				;fall into srvrSnd
+                
+                ;------------------------------------------------------------------------------
+                ; srvrSnd - Send a data buffer to the serial disk server. Computes and
+                ;    sends the checksum as well.
+                ;
+                ; On Entry:
+                ;    HL points to the buffer to send
+                ;    DE contains the length of the buffer
+                ;
+                ; On Exit:
+                ;
+                ; Clobbers all
+                ;------------------------------------------------------------------------------
+ CAD4 010000    srvrSnd	lxi	b,0		;BC=checksum
+                
+ CAD7 7E        ssLoop	mov	a,m		;A=byte to send
+ CAD8 81        	add	c		;update checksum LSB
+ CAD9 4F        	mov	c,a		
+ CADA 3E00      	mvi	a,0
+ CADC 88        	adc	b		;MSB
+ CADD 47        	mov	b,a	
+                
+ CADE 7E        	mov	a,m		;A=byte to send
+ CADF CDEECA    	call	ssByte		;server send byte
+ CAE2 23        	inx	h		;point to next byte
+ CAE3 1B        	dcx	d		;decrement byte count
+ CAE4 7A        	mov	a,d		;all done?
+ CAE5 B3        	ora	e
+ CAE6 C2D7CA    	jnz	ssLoop		;loop until zero
+                
+                ; Send checksum (2 bytes)
+                
+ CAE9 79        	mov	a,c		;LSB of checksum
+ CAEA CDEECA    	call	ssByte
+ CAED 78        	mov	a,b		;MSB of checksum
+                				;fall into ssByte
+                
+                ;-------------------------------------------------------------------
+                ; ssByte - Send a single byte from A to the serial disk server
+                ;-------------------------------------------------------------------
+ CAEE F5        ssByte	push	psw		;preserve char to send
+                	
+ CAEF DB2D      ssbLoop	in	COM2LSR		;loop until OK to send
+ CAF1 E620      	ani	COMTHRE	
+ CAF3 CAEFCA    	jz	ssbLoop
+                
+ CAF6 F1        	pop	psw		;A=byte to send
+ CAF7 D328      	out	COM2DAT
+ CAF9 C9        	ret
+                
+                ;------------------------------------------------------------------------------
+                ; srvrRcv - Receive a data buffer from the serial disk server. Computes and
+                ;    verifies the checksum as well.
+                ;
+                ; On Entry:
+                ;    HL points to the buffer to receive
+                ;    DE contains the length of the buffer
+                ;
+                ; On Exit:
+                ;    Zero true if received without error
+                ;    Zero false for timeout or checksum error
+                ; Clobbers all
+                ;------------------------------------------------------------------------------
+ CAFA 010000    srvrRcv	lxi	b,0		;compute checksum in BC
+                
+ CAFD CD1BCB    srLoop	call	srByte		;get a byte
+ CB00 C0        	rnz			;timeout error
+ CB01 77        	mov	m,a		;save byte in the buffer
+                
+ CB02 81        	add	c		;update checksum
+ CB03 4F        	mov	c,a
+ CB04 3E00      	mvi	a,0
+ CB06 88        	adc	b
+ CB07 47        	mov	b,a
+                
+ CB08 23        	inx	h		;increment buffer pointer
+ CB09 1B        	dcx	d		;decrement byte counter
+ CB0A 7A        	mov	a,d
+ CB0B B3        	ora	e
+ CB0C C2FDCA    	jnz	srLoop		;loop until zero
+                
+                ; Receive and compare 16 bit checksum
+                
+ CB0F CD1BCB    	call	srByte		;get LSB of checksum
+ CB12 C0        	rnz			;timeout
+ CB13 B9        	cmp	c		;match?
+ CB14 C0        	rnz			;no
+                		
+ CB15 CD1BCB    	call	srByte		;get MSB of checksum
+ CB18 C0        	rnz			;timeout
+ CB19 B8        	cmp	b		;match?
+ CB1A C9        	ret			;return with status
+                
+                ;-------------------------------------------------------------------
+                ; srByte - Receive a byte from the server with 1 second timeout.
+                ;    Returns zero false for timeout, else true.
+                ;-------------------------------------------------------------------
+ CB1B C5        srByte	push	b		;preserve BC
+ CB1C 01C3A2    	lxi	b,41667		;1 second (48 cycles, 24us per loop)
+                	
+ CB1F DB2D      srbLoop	in	COM2LSR		;(10)
+ CB21 0F        	rrc			;(4)
+ CB22 DA2ECB    	jc	srbNew		;(10)
+                
+ CB25 0B        	dcx	b		;(5)
+ CB26 78        	mov	a,b		;(5)
+ CB27 B1        	ora	c		;(4)
+ CB28 C21FCB    	jnz	srbLoop		;(10)
+                
+ CB2B C1        	pop	b
+ CB2C 3C        	inr	a		;zero false for timeout
+ CB2D C9        	ret
+                
+ CB2E C1        srbNew	pop	b		;restore BC
+ CB2F AF        	xra	a		;zero true
+ CB30 DB28      	in	COM2DAT		;get and return the byte
+ CB32 C9        	ret
+                
+                ;------------------------------------------------------------------------------
+                ; dispMsg - Display the null-terminated string following the dispMsg call
+                ;
+                ; On Entry SP->message
+                ;
+                ; On Exit
+                ;    Clobbers C,H,L
+                ;------------------------------------------------------------------------------
+ CB33 E1        dispMsg	pop	h		;HL->string
+                
+ CB34 7E        dmLoop	mov	a,m		;A=next character
+ CB35 23        	inx	h		;bump string pointer
+ CB36 B7        	ora	a		;null terminator?
+ CB37 CA41CB    	jz	dmExit		;yes, exit
+                
+ CB3A 4F        	mov	c,a		;conOut needs character in C
+ CB3B CD61CB    	call	conOut		;send the character
+ CB3E C334CB    	jmp	dmLoop
+                
+ CB41 E9        dmExit	pchl			;return past message string
+                
+                ;---------------------------------------------------------------------------
+                ;  CON device I/O
+                ;---------------------------------------------------------------------------
+                
+                ; conSt - Console status BIOS entry point. Return FFh if character ready,
+                ;    return zero otherwise. 
+                
+ CB42 0601      conSt	mvi	b,SHFTCON	;B=console IOBYTE alignment shift count
+ CB44 CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CB47 E3CB      	dw	sio1St		;TTY use 2SIO Port 1
+ CB49 D3CB      	dw	com1St		;CRT use JAIR port 1
+ CB4B B1CB      	dw	batchSt		;BAT indirect through RDR logical device
+ CB4D DBCB      	dw	com2St		;UC1 use JAIR port 2
+                
+                ; conIn - Console input BIOS entry point. Wait for console input and
+                ;    return character in A. Console input is used as an idle indicator
+                ;    and as a good time to flush a dirty track buffer, unload the head, 
+                ;    and invalidate the track buffer.
+                
+ CB4F CDB9CA    conIn	call	invFlsh		;invalidate and flush track buffer
+                	
+ CB52 0601      	mvi	b,SHFTCON	;B=console IOBYTE alignment shift count
+ CB54 0E7F      	mvi	c,07Fh		;C=AND mask for input byte
+ CB56 CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CB59 11CC      	dw	sio1In		;TTY use 2SIO port 1
+ CB5B FDCB      	dw	com1In		;CRT use JAIR port 1
+ CB5D 7BCB      	dw	reader		;BAT indirect through RDR logical device
+ CB5F 07CC      	dw	com2In		;UC1 use JAIR port 2
+                
+                ; conOut - Console output BIOS entry point. Output the character in C.
+                ;   If the sndNull flags is true (i.e., it was determined during cold start
+                ;   that the console is a Teletype), then follow CR with a null.
+                
+ CB61 CD6ECB    conOut	call	doConO		;send the character passed in C
+                
+ CB64 3A35C8    	lda	sndNull		;sending null for CR?
+ CB67 B7        	ora	a
+ CB68 C8        	rz			;no, exit
+                	
+ CB69 79        	mov	a,c		;was character a CR?
+ CB6A D60D      	sui	CR
+ CB6C C0        	rnz			;no, exit
+                	
+ CB6D 4F        	mov	c,a		;put a zero in C and send it
+                
+ CB6E 0601      doConO	mvi	b,SHFTCON	;B=console IOBYTE alignment shift count
+ CB70 CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CB73 6CCC      	dw	sio1Out		;TTY use 2SIO port 1
+ CB75 56CC      	dw	com1Out		;CRT use JAIR port 1
+ CB77 A4CB      	dw	list		;BAT indirect through LST logical device
+ CB79 61CC      	dw	com2Out		;UC1 use JAIR port 2
+                
+                ;---------------------------------------------------------------------------
+                ; RDR device - Reader input character BIOS entry point. Return in A
+                ;---------------------------------------------------------------------------
+ CB7B 0607      reader	mvi	b,SHFTRDR	;B=reader IOBYTE alignment shift count
+ CB7D 0EFF      	mvi	c,0FFh		;C=AND mask for input byte
+ CB7F CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CB82 11CC      	dw	sio1In		;TTY use 2SIO port 1
+ CB84 FDCB      	dw	com1In		;PTR use JAIR port 1
+ CB86 25CC      	dw	acrIn		;UR1 use cassette port (SIO 6/7)
+ CB88 07CC      	dw	com2In		;UR2 use JAIR port 2 
+                
+                ;---------------------------------------------------------------------------
+                ; PUN device - Punch output character BIOS entry point. Byte to send in C.
+                ;---------------------------------------------------------------------------
+ CB8A 0605      punch	mvi	b,SHFTPUN	;B=punch IOBYTE alignment shift count
+ CB8C CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CB8F 6CCC      	dw	sio1Out		;TTY use 2SIO port 1
+ CB91 56CC      	dw	com1Out		;PTP use JAIR port 1
+ CB93 A8CC      	dw	acrOut		;UP1 use cassette port (SIO 6/7)
+ CB95 61CC      	dw	com2Out		;UP2 use JAIR port 2
+                
+                ;---------------------------------------------------------------------------
+                ;  LST device I/O
+                ;---------------------------------------------------------------------------
+                
+                ; listSt - List output test BIOS entry point. Return 0FFh if list device
+                ;    is ready, 0 if not ready
+                
+ CB97 0603      listSt	mvi	b,SHFTLST	;B=list IOBYTE alignment shift count
+ CB99 CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CB9C 3ECC      	dw	sio1OSt		;TTY use 2SIO port 1
+ CB9E 2ECC      	dw	com1OSt		;CRT use JAIR port 1
+ CBA0 4ECC      	dw	lpcOSt		;LPT use LPC board
+ CBA2 36CC      	dw	com2OSt		;UL1 use JAIR port 2
+                
+                ; list - List output character BIOS entry point. Send the character
+                ;    passed in C out the list port
+                
+ CBA4 0603      list	mvi	b,SHFTLST	;B=list IOBYTE alignment shift count
+ CBA6 CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CBA9 6CCC      	dw	sio1Out		;TTY use 2SIO port 1
+ CBAB 56CC      	dw	com1Out		;CRT use JAIR port 1
+ CBAD B3CC      	dw	lpcOut		;LPT use LPC board
+ CBAF 61CC      	dw	com2Out		;UL1 use JAIR port 2
+                
+                ;---------------------------------------------------------------------------
+                ;  BAT device I/O - The BAT device is assigned as a physical device
+                ;     for CON. However, BAT is actually a logical device that uses
+                ;     whatever RDR is assigned to for input and whatever LST is assigned
+                ;     to for output. The only jump table that does not already exist
+                ;     is the input test routine for the reader devices
+                ;---------------------------------------------------------------------------
+                
+                ; batchSt - BAT device input status
+                
+ CBB1 0607      batchSt	mvi	b,SHFTRDR	;BAT in uses RDR device
+ CBB3 CDBECB    	call	doIo		;call the proper I/O routine below
+                
+ CBB6 E3CB      	dw	sio1st		;TTY test 2SIO port 1
+ CBB8 D3CB      	dw	com1St		;RDR test JAIR port 1
+ CBBA F3CB      	dw	acrSt		;UR1 test cassette port (SIO 6/7)
+ CBBC DBCB      	dw	com2St		;UR2 test JAIR port 2
+                
+                ;---------------------------------------------------------------------------
+                ; doIo - Perform physical I/O device based on the IOBYTE. The value passed
+                ;    in B contains the left-shift count to align the calling device's IOBYTE
+                ;    field into bits 2 and 1 (not 1 and 0). Preserves H,L
+                ;--------------------------------------------------------------------------- 
+ CBBE 3A0300    doIo	lda	IOBYTE		;A=CP/M IO BYTE
+                
+ CBC1 07        ioAlign	rlc			;rotate into bits 2 and 1
+ CBC2 05        	dcr	b
+ CBC3 C2C1CB    	jnz	ioAlign
+                
+ CBC6 E606      	ani	6		;get the 2 bit field alone
+                
+                ; 2 bit field aligned in bits 2 and 1. Index into jump table of caller.
+                
+ CBC8 E3        	xthl			;hl=table address from stack, save hl
+                
+ CBC9 5F        	mov	e,a		;form DE=table offset
+ CBCA 1600      	mvi	d,0
+ CBCC 19        	dad	d		;HL->address in table based on IOBYTE
+                
+ CBCD 5E        	mov	e,m		;E=lsb of where to jump
+ CBCE 23        	inx	h
+ CBCF 56        	mov	d,m		;D=msb of where to jump
+ CBD0 EB        	xchg			;HL->where to jump
+                
+ CBD1 E3        	xthl			;jump address on stack, restore HL
+ CBD2 C9        	ret			;jump to address specified in table
+                
+                ;---------------------------------------------------------------------------
+                ; Input status routines
+                ;---------------------------------------------------------------------------
+                
+                ; com1St - Console status routine for JAIR port 1. Return FFh 
+                ;    if character ready, return zero otherwise. 
+                
+ CBD3 DB25      com1St	in	COM1LSR		;read 2SIO #1 status/control register
+ CBD5 E601      	ani	COMDR		;data present?
+ CBD7 C8        	rz			;no, return zero
+                
+ CBD8 3EFF      	mvi	a,0FFh		;else, return FF
+ CBDA C9        	ret
+                
+                ; com2St - Console status routine for JAIR port 2. Return FFh 
+                ;    if character ready, return zero otherwise. 
+                
+ CBDB DB2D      com2St	in	COM2LSR		;read 2SIO #1 status/control register
+ CBDD E601      	ani	COMDR		;data present?
+ CBDF C8        	rz			;no, return zero
+                
+ CBE0 3EFF      	mvi	a,0FFh		;else, return FF
+ CBE2 C9        	ret
+                
+                ; sio1St - Console status routine for 2SIO port 1. Return FFh 
+                ;    if character ready, return zero otherwise. 
+                
+ CBE3 DB10      sio1St	in	SIO1CTL		;read 2SIO #1 status/control register
+ CBE5 E601      	ani	SIORDRF		;data present?
+ CBE7 C8        	rz			;no, return zero
+                
+ CBE8 3EFF      	mvi	a,0FFh		;else, return FF
+ CBEA C9        	ret
+                
+                ; sio2St - Console status routine for 2SIO port 2. Return 0ff 
+                ;    if character ready, return zero otherwise. 
+                
+ CBEB DB12      sio2St	in	SIO2CTL		;read 2SIO #2 status/control register
+ CBED E601      	ani	SIORDRF		;data present?
+ CBEF C8        	rz			;no, return zero
+                
+ CBF0 3EFF      	mvi	a,0FFh		;else, return FF
+ CBF2 C9        	ret
+                
+ CBF3 DB06      acrSt	in	ACRCTL		;read ACR (SIO) control register
+ CBF5 EEFF      	xri	0FFh		;convert to positive logic
+ CBF7 E601      	ani	SIORCV		;data present?
+ CBF9 C8        	rz			;no, return zero
+                
+ CBFA 3EFF      	mvi	a,0FFh		;else, return FF
+ CBFC C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; Character input routines
+                ;---------------------------------------------------------------------------
+                
+                ; com1In - input character from 1st port on a JAIR board and return in A.
+                ;    C contains AND mask.
+                
+ CBFD CDD3CB    com1In	call	com1St		;wait for character
+ CC00 CAFDCB    	jz	com1In		;no, loop until data available
+                
+ CC03 DB20      	in	COM1DAT		;read the character
+ CC05 A1        	ana	c		;possibly clear msbit
+ CC06 C9        	ret
+                
+                ; com2In - input character from 2nd port on a JAIR board and return in A.
+                ;    C contains AND mask.
+                
+ CC07 CDDBCB    com2In	call	com2St		;wait for character
+ CC0A CA07CC    	jz	com2In		;no, loop until data available
+                
+ CC0D DB28      	in	COM2DAT		;read the character
+ CC0F A1        	ana	c		;possibly clear msbit
+ CC10 C9        	ret
+                
+                ; sio1In - input character from 1st port on a 2SIO board and return in A.
+                ;    C contains AND mask.
+                
+ CC11 CDE3CB    sio1In	call	sio1St		;wait for character
+ CC14 CA11CC    	jz	sio1In		;no, loop until data available
+                
+ CC17 DB11      	in	SIO1DAT		;read the character
+ CC19 A1        	ana	c		;possibly clear msbit
+ CC1A C9        	ret
+                
+                ; sio2In - input character from 2nd port on a 2SIO board and return in A
+                ;    C contains AND mask.
+                
+ CC1B CDEBCB    sio2In	call	sio2St		;wait for character
+ CC1E CA1BCC    	jz	sio2In		;no, loop until data available
+                	
+ CC21 DB13      	in	SIO2DAT		;read the character
+ CC23 A1        	ana	c		;possibly clear msbit
+ CC24 C9        	ret
+                
+                ; acrIn - input character from ACR SIO board at address 6/7
+                
+ CC25 CDF3CB    acrIn	call	acrSt		;wait for character
+ CC28 CA25CC    	jz	acrIn		;no, loop until data available
+                	
+ CC2B DB07      	in	ACRDAT		;read the character
+ CC2D C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; Output status routines
+                ;----------------------------------------------------------------------------
+                
+                ; com1OSt - Return FFh if JAIR Port #1 is ready, 0 if not ready
+                
+ CC2E DB25      com1OSt	in	COM1LSR		;read COM1 line status register
+ CC30 E620      	ani	COMTHRE		;0=busy
+ CC32 C8        	rz			;not ready, return 0
+                
+ CC33 3EFF      	mvi	a,0FFh		;else, return FF
+ CC35 C9        	ret
+                
+                ; com2OSt - Return FFh if JAIR Port #2 is ready, 0 if not ready
+                
+ CC36 DB2D      com2OSt	in	COM2LSR		;read COM2 line status register
+ CC38 E620      	ani	COMTHRE		;0=busy
+ CC3A C8        	rz			;not ready, return 0
+                
+ CC3B 3EFF      	mvi	a,0FFh		;else, return FF
+ CC3D C9        	ret
+                
+                ; sio1OSt - Return FFh if 2SIO Port #1 is ready, 0 if not ready
+                
+ CC3E DB10      sio1OSt	in	SIO1CTL		;read 2SIO #1 status/control register
+ CC40 E602      	ani	SIOTDRE		;0=busy
+ CC42 C8        	rz			;not ready, return 0
+                
+ CC43 3EFF      	mvi	a,0FFh		;else, return FF
+ CC45 C9        	ret
+                
+                ; sio2OSt - Return FFh if 2SIO Port #1 is ready, 0 if not ready
+                
+ CC46 DB12      sio2OSt	in	SIO2CTL		;read 2SIO #2 status/control register
+ CC48 E602      	ani	SIOTDRE		;0=busy
+ CC4A C8        	rz			;not ready, return 0
+                
+ CC4B 3EFF      	mvi	a,0FFh		;else, return FF
+ CC4D C9        	ret
+                
+                ; lpcOst - Return FFh if 88-LPC is ready, 0 if not ready
+                
+ CC4E DB02      lpcOSt	in	LPCCTL		;88-LPC board at port 2,3
+ CC50 E602      	ani	LPCBSY		;0=busy
+ CC52 C8        	rz			;not ready, return 0
+                
+ CC53 3EFF      	mvi	a,0FFh		;else, return FF
+ CC55 C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; Character output routines
+                ;---------------------------------------------------------------------------
+                
+                ; com1Out - Transmit byte through JAIR port 1. Byte to send in C.
+                
+ CC56 DB25      com1Out	in	COM1LSR		;read COM1 line status register
+ CC58 E620      	ani	COMTHRE		;transmit data register empty?
+ CC5A CA56CC    	jz	com1Out		;no, wait for next character
+                
+ CC5D 79        	mov	a,c		;get character to xmit
+ CC5E D320      	out	COM1DAT		;send it
+ CC60 C9        	ret
+                
+                ; com1Out - Transmit byte through JAIR port 2. Byte to send in C.
+                
+ CC61 DB2D      com2Out	in	COM2LSR		;read COM2 line status register
+ CC63 E620      	ani	COMTHRE		;transmit data register empty?
+ CC65 CA61CC    	jz	com2Out		;no, wait for next character
+                
+ CC68 79        	mov	a,c		;get character to xmit
+ CC69 D328      	out	COM2DAT		;send it
+ CC6B C9        	ret
+                
+                ; sio1Out - Transmit byte through JAIR port 1. Byte to send in C. Detect
+                ;   110 baud teletype during cold start and set sndNull flag true.
+                
+ CC6C 110000    sio1Out	lxi	d,0		;init inter-character timer
+                
+ CC6F DB10      sio1Wt	in	SIO1CTL		;(10) read 2SIO #1 status/control register
+ CC71 E602      	ani	SIOTDRE		;(7) transmit data register empty?
+ CC73 C27ACC    	jnz	sio1Rdy		;(10) yes, ready for next character
+                
+ CC76 13        	inx	d		;(5) count 21us tics
+ CC77 C36FCC    	jmp	sio1Wt		;(10) keep waiting for ready
+                
+                ; If still in cold start, then see if the inter-character timer indicates
+                ;    we're connected to a 110 baud Teletype. If so, set the sndNull
+                ;    flag to true
+                
+ CC7A 3A95CD    sio1Rdy	lda	coldSt		;A=FF during cold start, 0 otherwise
+ CC7D A2        	ana	d		;A=D during cold start, 0 otherwise
+ CC7E FE0B      	cpi	11		;if D (MSB of counter) < 11, not 110 baud
+ CC80 DA86CC    	jc	sio1Xmt		;not 110 baud
+                
+ CC83 3235C8    	sta	sndNull		;otherwise, set send null flag true
+                
+                ; sio1Xmt - send the character in C. 
+                
+ CC86 79        sio1Xmt	mov	a,c		;get character to xmit
+ CC87 D311      	out	SIO1DAT		;send it
+ CC89 C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; sio2Out - Transmit byte through 2SIO port 2. Byte to send in C. Detect
+                ;   110 baud teletype during cold start and set sndNull flag true.
+                
+ CC8A 110000    sio2Out	lxi	d,0		;init inter-character timer
+                
+ CC8D DB12      sio2Wt	in	SIO2CTL		;read 2SIO #2 status/control register
+ CC8F E602      	ani	SIOTDRE		;transmit data register empty?
+ CC91 C298CC    	jnz	sio2Rdy		;yes, ready for next character
+                
+ CC94 13        	inx	d		;count 21us tics
+ CC95 C38DCC    	jmp	sio2Wt		;keep waiting for ready
+                
+                ; if still in cold start, then see if the inter-character timer indicates
+                ;    we're connected to a 110 baud Teletype. If so, set the sndNull
+                ;    flag to true
+                
+ CC98 3A95CD    sio2Rdy	lda	coldSt		;A=FF during cold start, 0 otherwise
+ CC9B A2        	ana	d		;A=D during cold start, 0 otherwise
+ CC9C FE0B      	cpi	11		;if D (MSB of counter) < 11, not 110 baud
+ CC9E DAA4CC    	jc	sio2Xmt		;not 110 baud
+                
+ CCA1 3235C8    	sta	sndNull		;otherwise, set send null flag true
+                
+                ; sio2Xmt - send the character in C. 
+                
+ CCA4 79        sio2Xmt	mov	a,c		;get character to xmit
+ CCA5 D313      	out	SIO2DAT		;send it
+ CCA7 C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; acrOut - Transmit byte through ACR SIO at address 6/7. Byte to send in C.
+                
+ CCA8 DB06      acrOut	in	ACRCTL		;read ACR (SIO) control register
+ CCAA E680      	ani	SIOXMT		;transmit data register empty?
+ CCAC C2A8CC    	jnz	acrOut		;not yet, keep waiting
+                
+ CCAF 79        	mov	a,c		;get character to xmit
+ CCB0 D307      	out	ACRDAT		;send it
+ CCB2 C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; lpcOut - Transmit byte through 88-LPC board.
+                
+ CCB3 CD4ECC    lpcOut	call	lpcOSt		;wait for printer		
+ CCB6 CAB3CC    	jz	lpcOut
+                
+ CCB9 79        	mov	a,c
+ CCBA E67F      	ani	07Fh		;force bit 7 to zero
+ CCBC D303      	out	LPCDAT		;output the character
+ CCBE C9        	ret
+                
+                ;-----------------------------------------------------------------------------
+                ; serInit - Initialize serial I/O port 0 and IOBYTE
+                ;           Port 1 is initialized in the boot loader
+                ;-----------------------------------------------------------------------------
+ CCBF 3E80      serInit	mvi	a,COMDLAB
+ CCC1 D323      	out	COM1LCR
+                
+ CCC3 3E0C      	mvi	a,COM96		;set COM1 to 9600
+ CCC5 D320      	out	COM1DLS
+ CCC7 3E00      	mvi	a,0
+ CCC9 D321      	out	COM1DMS
+                
+ CCCB 3E03      	mvi	a,COM8BIT	;8N1
+ CCCD D323      	out	COM1LCR
+                
+ CCCF 3A34C8    	lda	dIoByte		;initialize IOBYTE with default
+ CCD2 320300    	sta	IOBYTE
+                
+ CCD5 C9        	ret
+                
+                ;******************************************************************************
+                ;
+                ;   BIOS Data Area
+                ;
+                ;******************************************************************************
+                
+                ;---------------------------------------------------------------------------
+                ; secAddr - Sector address table. Returns sector buffer address within
+                ;    the track buffer when indexed by hard sector number. Each sector
+                ;    requires PSECLEN bytes.
+                ;---------------------------------------------------------------------------
+ CCD6 B4CE3DCFC6secAddr	dw	trkBuf+00*PSECLEN,trkBuf+01*PSECLEN,trkBuf+02*PSECLEN
+ CCDC 4FD0D8D061	dw	trkBuf+03*PSECLEN,trkBuf+04*PSECLEN,trkBuf+05*PSECLEN
+ CCE2 EAD173D2FC	dw	trkBuf+06*PSECLEN,trkBuf+07*PSECLEN,trkBuf+08*PSECLEN
+ CCE8 85D30ED497	dw	trkBuf+09*PSECLEN,trkBuf+10*PSECLEN,trkBuf+11*PSECLEN
+ CCEE 20D5A9D532	dw	trkBuf+12*PSECLEN,trkBuf+13*PSECLEN,trkBuf+14*PSECLEN
+ CCF4 BBD644D7CD	dw	trkBuf+15*PSECLEN,trkBuf+16*PSECLEN,trkBuf+17*PSECLEN
+ CCFA 56D8DFD868	dw	trkBuf+18*PSECLEN,trkBuf+19*PSECLEN,trkBuf+20*PSECLEN
+ CD00 F1D97ADA03	dw	trkBuf+21*PSECLEN,trkBuf+22*PSECLEN,trkBuf+23*PSECLEN
+ CD06 8CDB15DC9E	dw	trkBuf+24*PSECLEN,trkBuf+25*PSECLEN,trkBuf+26*PSECLEN
+ CD0C 27DDB0DD39	dw	trkBuf+27*PSECLEN,trkBuf+28*PSECLEN,trkBuf+29*PSECLEN
+ CD12 C2DE4BDF  	dw	trkBuf+30*PSECLEN,trkBuf+31*PSECLEN
+                	
+                ;-----------------------------------------------------------------------------
+                ; dpHead - disk parameter header for each drive
+                ;-----------------------------------------------------------------------------
+ CD16 65CD000000dpHead	dw	tranTbl,0,0,0,dirBuf,dpb,csv0,alv0
+ CD26 65CD000000	dw	tranTbl,0,0,0,dirBuf,dpb,csv1,alv1
+ CD36 65CD000000	dw	tranTbl,0,0,0,dirBuf,dpb,csv2,alv2
+ CD46 65CD000000	dw	tranTbl,0,0,0,dirBuf,dpb,csv3,alv3
+                
+                ;-----------------------------------------------------------------------------
+                ; dpb - disk parameter block. This table gives a 2K block size and
+                ;   64 directory entries. 
+                ;-----------------------------------------------------------------------------
+ CD56 2000      dpb	dw	NUMSEC		;sectors per track
+ CD58 04        	db	BSH		;allocation block shift factor (BSH)
+ CD59 0F        	db	BLM		;data location block mask (BLM)
+ CD5A 00        	db	EXM		;extent mask (EXM)
+ CD5B 9500      	dw	DSM		;maximum block number (149)	
+ CD5D 3F00      	dw	DRM		;maximum directory entry number (63)
+ CD5F C000      	db	AL0,AL1		;AL0, AL1 
+ CD61 1000      	dw	CKS		;CKS=(DRM+1)/4
+ CD63 0200      	dw	RESTRK		;reserved tracks for CPM and bootloader
+                
+ CD65 0109111903tranTbl	db	01,09,17,25,03,11,19,27,05,13,21,29,07,15,23,31
+ CD75 020A121A04	db	02,10,18,26,04,12,20,28,06,14,22,30,08,16,24,32
+                
+                ;----------------------------------------------------------------------------
+                ; Initialized data
+                ;----------------------------------------------------------------------------
+ CD85 52454144  readCmd	db	'READ'		;read command to server
+ CD89 00        rcTrack	db	0
+ CD8A 00        rcDrive	db	0
+ CD8B 2011      rcLen	dw	TRKLEN
+ 0008 =         CMDLEN	equ	$-readCmd
+                
+ CD8D 57524954  wrtCmd	db	'WRIT'		;write command to server
+ CD91 00        wcTrack	db	0
+ CD92 00        wcDrive	db	0
+ CD93 2011      wcLen	dw	TRKLEN
+                
+ CD95 FF        coldSt	db	0FFh		;FF during cold start, 0 otherwise
+                
+ CD96 00        bfDirty	db	0		;non-zero if buffer has been written to
+ CD97 FF        bfDrive	db	UNDEF		;drive currently in track buffer
+ CD98 FF        bfTrack	db	UNDEF		;currently buffered track (MUST follow bfDrive)
+                
+                ;----------------------------------------------------------------------------
+                ; Non-initialized data
+                ;----------------------------------------------------------------------------
+ CD99           bfDrvSv	ds	1		;saved drive number that is currently buffered
+ CD9A           drvNum	ds	1		;drive number from CP/M call
+ CD9B           trkNum	ds	1		;track number from CP/M call (MUST follow drvNum)
+ CD9C           secNum	ds	1		;sector number from CP/M call
+ CD9D           dmaAddr	ds	2		;dma address for disk operations from CP/M call
+ CD9F           rtryCnt	ds	1		;disk I/O retry counter
+                
+ CDA0           cmdResp	ds	4		;server command response buffer
+ CDA4           crCode	ds	2		;response code
+ CDA6           crData	ds	2		;response data
+                
+                ;-----------------------------------------------------------------------------
+                ;  Disk scratchpad areas defined in the DPH table
+                ;-----------------------------------------------------------------------------
+ CDA8           dirBuf	ds	128		;bdos directory scratchpad
+ CE28           alv0	ds	(DSM/8 + 1)	;allocation vector storage
+ CE3B           csv0	ds	CKS		;change disk scratchpad
+ CE4B           alv1	ds	(DSM/8 + 1)
+ CE5E           csv1	ds	CKS
+ CE6E           alv2	ds	(DSM/8 + 1)
+ CE81           csv2	ds	CKS
+ CE91           alv3	ds	(DSM/8 + 1)
+ CEA4           csv3	ds	CKS
+                
+                ;-----------------------------------------------------------------------------
+                ; Track buffer
+                ;-----------------------------------------------------------------------------
+ CEB4           trkBuf	ds	NUMSEC*PSECLEN
+                
+ 17D4 =         ACTLEN	equ	$-BIOSBAS	;actual length of the BIOS
+                
+ DFD4           	end

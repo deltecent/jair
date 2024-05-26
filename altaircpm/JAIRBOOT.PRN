@@ -1,0 +1,287 @@
+
+
+S               e****************************************************************************
+                ;
+                ;  CP/M cold boot loader for Altair CP/M using virtual Altair 8" floppy
+                ;    drives served through the JAIR second serial port.
+                ;
+                ;    This code is loaded from sectors 0 and 2 into RAM by the disk boot
+                ;    loader PROM. This loader, in turn, loads the CP/M image into RAM.
+                ;
+                ;    Version History
+                ;
+                ;    Ver     Date	  Description
+                ;    ---   ---------	---------------------
+                ;    1.0   10/29/23	Modified for JAIR, Patrick Linstruth
+                ;
+                ;    Original version for 2SIO written by Mike Douglas
+                ;
+                ;--------------------------------------------------------------------------
+                ;
+                ;    To patch changes made to this loader into a CP/M image saved from
+                ;    MOVCPM2S (e.g., CPMxx.COM), use the following commands:
+                ;
+                ;	A>DDT CPMxx.COM
+                ;	-IBOOT.HEX
+                ;	-R900
+                ;       -M980,9FF,A00	(splits code onto sectors 0 and 2)
+                ;	-G0	    	(Go zero, not "oh")
+                ;	A>SYSGEN
+                ;
+                ;****************************************************************************
+                
+ 0038 =         MEMSIZE	equ	56		;set memory size in K bytes
+                
+                ; 8" floppy equates
+                
+ 0020 =         NUMSEC	equ	32		;sectors per track
+ 0089 =         PSECLEN	equ	137		;physical sector length
+ 0080 =         CSECLEN	equ	128		;CP/M sector length
+ 1120 =         TRKLEN	equ	NUMSEC*PSECLEN
+ 0003 =         SYSDATA	equ	3		;offset of 128 byte data payload in sector
+ 0003 =         STRTSEC	equ	3		;starting sector of CP/M image on track 0
+                
+                ; CP/M size & locations
+                
+ 0800 =         CCPLEN	equ	0800h		;CPM 2.2 fixed length
+ 0E00 =         BDOSLEN	equ	0E00h		;CPM 2.2 fixed length
+ 1800 =         BIOSLEN	equ	1800h		;length of BIOS for 8" floppy
+                
+ B200 =         CCPBASE	equ	MEMSIZE*1024 - BIOSLEN - BDOSLEN - CCPLEN
+ C800 =         BIOSBAS	equ	(CCPBASE+CCPLEN+BDOSLEN) ;base address of this BIOS
+                
+                ;-----------------------------
+                ; JAIR Serial Ports 
+                ;-----------------------------
+ 0020 =         COM1	equ	20h		;COM1 base port address
+ 0020 =         COM1DAT	equ	COM1		;1st port on 2SIO board - data register
+ 0023 =         COM1LCR	equ	COM1 + 3	;COM1 - line control register
+ 0024 =         COM1MCR	equ	COM1 + 4	;COM1 - modem control register
+ 0025 =         COM1LSR	equ	COM1 + 5	;COM1 - line status register
+ 0026 =         COM1MSR	equ	COM1 + 6	;COM1 - modem status register
+ 0020 =         COM1DLS	equ	COM1		;COM1 - divisor latch (LS)
+ 0021 =         COM1DMS	equ	COM1 + 1	;COM1 - divisor latch (MS)
+ 0028 =         COM2	equ	28h		;COM2 base port address
+ 0028 =         COM2DAT	equ	COM2		;2nd port on 2SIO board - data register
+ 002B =         COM2LCR	equ	COM2 + 3	;COM2 - line control register
+ 002C =         COM2MCR	equ	COM2 + 4	;COM2 - modem control register
+ 002D =         COM2LSR	equ	COM2 + 5	;COM2 - line status register
+ 002E =         COM2MSR	equ	COM2 + 6	;COM2 - modem status register
+ 0028 =         COM2DLS	equ	COM2		;COM2 - divisor latch (LS)
+ 0029 =         COM2DMS	equ	COM2 + 1	;COM2 - divisor latch (MS)
+ 0080 =         COMDLAB	equ	80h		;divisor latch access bit (DLAB)
+ 0001 =         COMDR	equ	01h		;data ready (DR)
+ 0020 =         COMTHRE	equ	20h		;transmit holding register empty (THRE)
+ 0001 =         COMDTR	equ	01h		;data terminal ready (DTR)
+ 0002 =         COMRTS	equ	02h		;request to send (RTS)
+ 0003 =         COM8BIT	equ	03h		;8 bits
+ 000C =         COM96 	equ	12		;9.6K baud rate
+ 0006 =         COM192	equ	6		;19.2K baud rate
+ 0003 =         COM384	equ	3		;38.4K baud rate
+ 0002 =         COM576	equ	2		;57.6K baud rate
+                
+                ;--------------------------------------------------------------------------
+                ;  Entry point
+                ;--------------------------------------------------------------------------
+ 0000           	org	0
+                
+ 0000 F3        start	di			;disable interrupts
+ 0001 3100B2    	lxi	sp,CCPBASE	;stack grows down from lowest CPM address
+                
+ 0004 3E80      	mvi	a,COMDLAB
+ 0006 D323      	out	COM1LCR
+ 0008 D32B      	out	COM2LCR
+                
+ 000A 3E0C      	mvi	a,COM96		;set COM1 to 9.6K baud rate
+ 000C D320      	out	COM1DLS
+ 000E 3E02      	mvi	a,COM576	;set COM2 to 38.4K baud rate
+ 0010 D328      	out	COM2DLS
+ 0012 3E00      	mvi	a,0
+ 0014 D321      	out	COM1DMS
+ 0016 D329      	out	COM2DMS
+                
+ 0018 3E03      	mvi	a,COM8BIT	;8N1
+ 001A D323      	out	COM1LCR
+ 001C D32B      	out	COM2LCR
+                
+                ; Display banner
+                
+ 001E 21DB00    	lxi	h,banner
+                
+ 0021 DB25      sndBanr	in	COM1LSR		;send banner
+ 0023 E620      	ani	COMTHRE
+ 0025 CA2100    	jz	sndBanr
+                
+ 0028 7E        	mov	a,m
+ 0029 B7        	ora	a
+ 002A CA3300    	jz	load
+                
+ 002D D320      	out	COM1DAT
+                	
+ 002F 23        	inx	h
+ 0030 C32100    	jmp	sndBanr
+                
+                ; Load and move 1st track
+                
+ 0033 AF        load	xra	a		;track 0
+ 0034 32FE00    	sta	trkNum
+ 0037 3E4D      	mvi	a,CSUMVAL AND 0FFh  ;re-init checksum
+ 0039 320201    	sta	chkSum
+ 003C CD8200    	call	readTrk		;read the track
+ 003F C23300    	jnz	load		;error
+                
+ 0042 21A202    	lxi	h,trkBuf+(STRTSEC*PSECLEN)+SYSDATA   ;source pointer
+ 0045 1100B2    	lxi	d,CCPBASE	;DE->where to put CP/M
+ 0048 0E1D      	mvi	c,NUMSEC-3	;sector count to move
+                
+ 004A CD7100    secLp1	call	movSec		;move 128 bytes to run location
+ 004D 0D        	dcr	c		;decrement sector count		
+ 004E C24A00    	jnz	secLp1
+                
+                ; Load and move second track
+                
+ 0051 21FE00    	lxi	h,trkNum	;move to track 1
+ 0054 34        	inr	m
+ 0055 210201    	lxi	h,chkSum	;update checksum
+ 0058 34        	inr	m
+ 0059 CD8200    	call	readTrk		;read second track
+ 005C C23300    	jnz	load		;error
+                	
+ 005F 210701    	lxi	h,trkBuf+SYSDATA   ;source pointer
+ 0062 1180C0    	lxi	d,CCPBASE+CSECLEN*(NUMSEC-3)	;dest pointer
+ 0065 0E20      	mvi	c,NUMSEC	;sector count to move
+                
+ 0067 CD7100    secLp2	call	movSec		;move 128 bytes to run location
+ 006A 0D        	dcr	c		;decrement sector count		
+ 006B C26700    	jnz	secLp2
+                
+ 006E C300C8    	jmp	BIOSBAS		;jump to BIOS cold start
+                
+                ;--------------------------------------------------------------------------
+                ; movSec - Move 128 byte sector from trkBuf to RAM
+                ;
+                ; On Entry
+                ;    HL->data portion of sector in trkBuf
+                ;    DE->where to put sector
+                ;
+                ; On Exit
+                ;    HL and DE point to next sector 
+                ; Clobbers B,D,E,H,L
+                ;----------------------------------------------------------------------------
+ 0071 0680      movSec	mvi	b,CSECLEN	;B=count of bytes to move
+                
+ 0073 7E        msLoop	mov	a,m		;move sector from trkBuf to run location
+ 0074 12        	stax	d
+ 0075 23        	inx	h		;increment pointers
+ 0076 13        	inx	d
+ 0077 05        	dcr	b		;loop count
+ 0078 C27300    	jnz	msLoop
+                 	
+ 007B C5        	push	b		;increment source pointer
+ 007C 010900    	lxi	b,PSECLEN-CSECLEN
+ 007F 09        	dad	b
+ 0080 C1        	pop	b
+ 0081 C9        	ret
+                
+                ;----------------------------------------------------------------------------
+                ; readTrk- read full track into track buffer
+                ;
+                ; On Entry
+                ;    trkNum = track to read
+                ;
+                ; On Exit
+                ;    track read into trkBuf
+                ;    Clobbers all
+                ;----------------------------------------------------------------------------
+ 0082 21FA00    readTrk	lxi	h,readCmd	;send read command to server
+ 0085 060A      	mvi	b,CMDLEN	;B=count of bytes to send
+ 0087 3E2E      	mvi	a,'.'		;send '.' on console
+ 0089 D320      	out	COM1DAT
+                
+ 008B DB2D      waitSnd	in	COM2LSR		;loop until OK to send
+ 008D E620      	ani	COMTHRE	
+ 008F CA8B00    	jz	waitSnd
+                
+ 0092 7E        	mov	a,m		;A=byte to send
+ 0093 D328      	out	COM2DAT		;send it
+                
+ 0095 23        	inx	h		;point to next byte
+ 0096 05        	dcr	b		;decrement byte count
+ 0097 C28B00    	jnz	waitSnd		;loop until command is sent
+                
+ 009A 210401    	lxi	h,trkBuf	;receive track data into trkBuf
+ 009D 112011    	lxi	d,TRKLEN	;DE=length to read
+ 00A0 010000    	lxi	b,0		;BC=checksum
+                
+ 00A3 CDC100    rtLoop	call	srByte		;get a byte
+ 00A6 C0        	rnz			;timeout error
+ 00A7 77        	mov	m,a		;save byte in the buffer
+                
+ 00A8 81        	add	c		;update checksum
+ 00A9 4F        	mov	c,a
+ 00AA 3E00      	mvi	a,0
+ 00AC 88        	adc	b
+ 00AD 47        	mov	b,a
+                
+ 00AE 23        	inx	h		;increment buffer pointer
+ 00AF 1B        	dcx	d		;decrement byte counter
+ 00B0 7A        	mov	a,d
+ 00B1 B3        	ora	e
+ 00B2 C2A300    	jnz	rtLoop		;loop until zero
+                
+                ; Receive and compare 16 bit checksum
+                
+ 00B5 CDC100    	call	srByte		;get LSB of checksum
+ 00B8 C0        	rnz			;timeout
+ 00B9 B9        	cmp	c		;match?
+ 00BA C0        	rnz			;no
+                		
+ 00BB CDC100    	call	srByte		;get MSB of checksum
+ 00BE C0        	rnz			;timeout
+ 00BF B8        	cmp	b		;match?
+ 00C0 C9        	ret			;return with status
+                
+                ;-------------------------------------------------------------------
+                ; srByte - Receive a byte from the server with 1 second timeout.
+                ;    Returns not zero for timeout, else zero.
+                ;-------------------------------------------------------------------
+ 00C1 C5        srByte	push	b		;preserve BC
+ 00C2 01E8FD    	lxi	b,65000		;1 second (48 cycles, 24us per loop)
+                	
+ 00C5 DB2D      srbLoop	in	COM2LSR		;(10)
+ 00C7 0F        	rrc			;(4)
+ 00C8 DAD600    	jc	srbNew		;(10)
+                
+ 00CB 0B        	dcx	b		;(5)
+ 00CC 78        	mov	a,b		;(5)
+ 00CD B1        	ora	c		;(4)
+ 00CE C2C500    	jnz	srbLoop		;(10)
+                
+ 00D1 D3FF      	out	255
+                
+ 00D3 C1        	pop	b
+ 00D4 3C        	inr	a		;zero false for timeout
+ 00D5 C9        	ret
+                
+ 00D6 C1        srbNew	pop	b		;restore BC
+                
+ 00D7 AF        	xra	a		;zero true
+ 00D8 DB28      	in	COM2DAT		;get and return the byte
+ 00DA C9        	ret
+                
+                ;---------------------------------------------------------------------------
+                ; Data Area
+                ;---------------------------------------------------------------------------
+ 014D =         CSUMVAL	equ	'R'+'E'+'A'+'D'+(TRKLEN/256)+(TRKLEN AND 0FFh)
+                
+ 00DB 4A41495220banner	db	'JAIR Serial Server Boot Loader',0
+ 00FA 52454144  readCmd	db	'READ'		;read command to server
+ 00FE 00        trkNum	db	0		;track number to read
+ 00FF 00        drvNum	db	0
+ 0100 2011      readLen	dw	TRKLEN
+ 0102 4D01      chkSum	dw	CSUMVAL
+ 000A =         CMDLEN	equ	$-readCmd
+                
+ 0104 =         trkBuf	equ	$		;track buffer
+                
+ 0104           	end
