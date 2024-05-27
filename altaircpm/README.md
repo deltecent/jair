@@ -1,4 +1,4 @@
-##Introduction
+## Introduction
 This folder contains a version of CP/M 2.2 for the JAIR that does not require disk images on an SD card.
 Instead, disk transfers are done through the second port on the JAIR and disk images are served from a PC.
 The server on the PC is the same server program that works with the Altair FDC+ controller.
@@ -9,7 +9,10 @@ Altair versions of CP/M from Lifeboat and Burcon.
 Version 1.4 or newer of the FDC+ server must be used to support the slower baud rates for this version
 of CP/M. A copy of the serial server can be found at https://deramp.com/downloads/altair/hardware/fdc+/
 
-##Using JAIR Serial Disk CP/M 2.2
+These disk images may also be used with the AltairZ80 simulator. Disks images can be easily modified
+without having to remove the SD card as all files are stored on the FDC+ serial server host.
+
+## Using JAIR Serial Disk CP/M 2.2
 The file “SerialJAIR63K.dsk” is a bootable CP/M image sized for at least 63K of RAM. Load this into drive
 0 of the server to boot. Unfortunately, this version of CP/M will not boot using the standard BIOS.HEX
 for booting CP/M. You can boot by either replacing BIOS.HEX on the SD card with JAIRBOOT.HEX, or manually
